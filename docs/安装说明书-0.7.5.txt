@@ -5,7 +5,7 @@
   插件名称 : Jenkins Console（中文名：Jenkins 管理台）
   插件 ID  : io.github.nixing178.jenkins
   版本     : 0.7.5
-  平台     : Windows x64
+  平台     : 原 v0.7.5 Release 为 Windows x64；多平台包见下方说明
   发布者   : nixing178
   许可证   : Apache-2.0
   文档日期 : 2026-10-23
@@ -33,7 +33,8 @@
 --------------------------------------------------------------------------------
 
   · DBX 0.6.43 或更高版本（插件清单 engines.dbx 要求）
-  · Windows x64
+  · Windows x64、macOS Intel / Apple Silicon 或 Linux x64 / ARM64
+    （需取得对应系统与架构的安装包；历史 Release 不一定包含所有平台）
   · 能访问 Jenkins 控制器（HTTP / HTTPS）
   · Jenkins 2.x（开发与端到端验证基于 Jenkins 2.586）
 
@@ -45,13 +46,27 @@
 三、安装包信息
 --------------------------------------------------------------------------------
 
+  多平台构建使用以下 target：
+    Windows x64         windows-x64
+    macOS Intel         darwin-x64
+    macOS Apple Silicon darwin-arm64
+    Linux x64           linux-x64
+    Linux ARM64         linux-arm64
+
+  文件命名：io.github.nixing178.jenkins-<version>-<target>.dbxp。
+  请选择与 DBX 所在系统及架构一致的包；Go 后端不能跨平台混用。
+  新工作流在后续新版本 Release 中生成上述五个平台的候选包，
+  不会自动为历史 v0.7.5 Release 补齐资产。macOS 本地构建体验包也不等同于
+  已发布的 Windows 包，其大小和 SHA-256 必须单独核对。
+
+  以下记录仅对应原 v0.7.5 Windows x64 资产：
   文件名 : io.github.nixing178.jenkins-0.7.5-windows-x64.dbxp
   来源   : GitHub Releases v0.7.5 资产（CI 从 tag 源码重建）
   大小   : 4,962,258 字节（约 4.73 MB）
   SHA-256: 414a4d2a06e9e37a6f5362c3ac5c8f1d59d7bbc40f00a862ad853ff2d94be551
   签名   : 未签名（unsigned review candidate，仅供本地 / 内网安装）
 
-  包内文件：
+  Windows 包内文件（macOS/Linux 后端位于 bin/<target>/dbx-plugin-jenkins）：
     manifest.json                          插件清单
     checksums.json                         包内校验和
     assets/plugin.svg                      插件图标
@@ -63,7 +78,14 @@
 
     Get-FileHash .\io.github.nixing178.jenkins-0.7.5-windows-x64.dbxp -Algorithm SHA256
 
-  输出的 Hash 应与上面 SHA-256 完全一致。
+  上述原 Windows 资产的 Hash 应与记录一致。
+  其它版本或平台，请与该 Release 的 release-candidates.json 中对应 target 的
+  sha256 和 size 核对；本地构建则使用同名 .artifact.json，不能套用上述数值。
+
+  macOS 校验示例（将 <version> 替换为实际版本）：
+    shasum -a 256 io.github.nixing178.jenkins-<version>-darwin-arm64.dbxp
+  Linux 校验示例：
+    sha256sum io.github.nixing178.jenkins-<version>-linux-x64.dbxp
 
 --------------------------------------------------------------------------------
 四、安装步骤
@@ -71,12 +93,12 @@
 
   1. 打开 DBX，进入「插件中心」，打开右上角「设置」，
      勾选「允许安装未签名开发包」。
-     说明：0.7.5 为未签名候选包，未勾选此项安装会被直接拒绝。
+     说明：本地构建和源码仓库 Release 提供未签名候选包，需要开启此项。
 
   2. 在「插件中心」点击「安装」→「从文件」，
-     选择 io.github.nixing178.jenkins-0.7.5-windows-x64.dbxp。
+     选择与当前系统和架构匹配的 .dbxp（target 见第三节）。
 
-  3. 安装完成后，在「已安装」列表确认插件版本显示为 0.7.5。
+  3. 安装完成后，在「已安装」列表确认插件版本与所选安装包一致。
      若显示其它版本，说明选错了安装包。
 
   4. 新建连接：连接类型选择「Jenkins」，按第五节填写参数，
@@ -142,7 +164,7 @@
      Plugin 'io.github.nixing178.jenkins' initialization failed:
      backend identity 'x' does not match manifest 'y'
      原因：包内后端版本与 manifest 声明不一致（早期 0.2.0 存在此问题）。
-     解决：改用 0.7.5 官方候选包；若仍报错，先卸载再重新安装。
+     解决：改用上游发布且与当前平台匹配的候选包；若仍报错，先卸载再重新安装。
 
   3) 点击「停止」或队列「取消」没有反应
      原因：0.7.4 及更早版本使用浏览器原生确认框，在 DBX 宿主窗口内被忽略，
@@ -201,7 +223,7 @@
 九、安装后验收清单
 --------------------------------------------------------------------------------
 
-  [ ] 插件中心「已安装」显示版本 0.7.5
+  [ ] 插件中心「已安装」版本与所选安装包一致
   [ ] 连接测试通过，概览页显示控制器版本与节点数
   [ ] 任务页能看到视图 Tab 与任务列表
   [ ] 打开任一任务，构建列表正常加载

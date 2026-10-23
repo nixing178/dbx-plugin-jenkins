@@ -34,16 +34,16 @@ dist/                      .dbxp 打包产物
 
 ## 安装依赖
 
-```powershell
-cd E:\DBX插件开发\Jenkins
-pnpm install
+```sh
+# 在仓库根目录执行（Windows / macOS / Linux）
+pnpm install --frozen-lockfile
 ```
 
 > pnpm 10 默认不执行依赖的 postinstall。若遇到 esbuild 的 `EBUSY` 校验失败，使用 `pnpm install --ignore-scripts`；esbuild 的 Windows 二进制来自 `@esbuild/win32-x64`，不受影响。
 
 ## 构建 UI
 
-```powershell
+```sh
 pnpm build        # vue-tsc 类型检查 + vite 单文件构建，输出到 ui/
 ```
 
@@ -53,16 +53,15 @@ pnpm build        # vue-tsc 类型检查 + vite 单文件构建，输出到 ui/
 
 后端全量：
 
-```powershell
-$env:PATH = "<Go 安装目录>\bin;" + $env:PATH
-cd E:\DBX插件开发\Jenkins\backend
+```sh
+cd backend
 go test ./... -v
+cd ..
 ```
 
 前端（Vitest）：
 
-```powershell
-cd E:\DBX插件开发\Jenkins
+```sh
 pnpm test
 ```
 
@@ -126,13 +125,12 @@ pnpm test
 
 ## 打包
 
-```powershell
-$env:PATH = "<Go 安装目录>\bin;" + $env:PATH
-cd E:\DBX插件开发\Jenkins
+确保 Node.js、pnpm 和 Go 已加入 `PATH`，在仓库根目录执行：
+
+```sh
 node scripts/check-version.mjs          # manifest / package.json / main.go / UA 版本必须一致
 pnpm build
 npx --yes @dbx-app/plugin-cli@0.1.9 package .
-node scripts/verify-sidecar-identity.mjs dist\dbx-plugin-jenkins.exe   # 校验后端 identity
 ```
 
 > **版本号必须同步**：DBX 会比对 `manifest.version` 与 sidecar `plugin/initialize` 返回的版本，
@@ -140,12 +138,30 @@ node scripts/verify-sidecar-identity.mjs dist\dbx-plugin-jenkins.exe   # 校验�
 > 版本号分散在 `manifest.json`、`package.json`、`backend/main.go`、`backend/internal/jenkins/client.go` 的 User-Agent 四处，
 > 由 `check-version.mjs` 与 `verify-sidecar-identity.mjs` 双重把关。
 
-产物：
+产物（`<version>` 来自 `manifest.json`，`<target>` 根据当前构建主机确定）：
 
+```text
+dist/io.github.nixing178.jenkins-<version>-<target>.dbxp
+dist/io.github.nixing178.jenkins-<version>-<target>.artifact.json
 ```
-dist/io.github.nixing178.jenkins-0.4.0-windows-x64.dbxp
-dist/io.github.nixing178.jenkins-0.4.0-windows-x64.artifact.json
+
+| 平台 | target | GitHub Actions runner |
+| --- | --- | --- |
+| Windows x64 | `windows-x64` | `windows-2022` |
+| macOS Intel | `darwin-x64` | `macos-15-intel` |
+| macOS Apple Silicon | `darwin-arm64` | `macos-15` |
+| Linux x64 | `linux-x64` | `ubuntu-24.04` |
+| Linux ARM64 | `linux-arm64` | `ubuntu-24.04-arm` |
+
+插件包含原生 Go Sidecar，不适用 `universal` 包。CLI 要求 target 与构建主机一致；本地只生成当前平台包，多平台发行由上述 runner 分别原生构建。
+
+如需校验后端身份，先解压 `.dbxp`，再将其中的可执行文件传给脚本：
+
+```sh
+node scripts/verify-sidecar-identity.mjs <解压目录>/bin/<target>/dbx-plugin-jenkins
 ```
+
+Windows 的可执行文件名需加 `.exe`；macOS/Linux 解压时需保留执行权限。
 
 ## 发布到 DBX 插件商店
 
@@ -156,25 +172,29 @@ dist/io.github.nixing178.jenkins-0.4.0-windows-x64.artifact.json
 `ui/` 与 `dist/` 不进 Git，候选包由 CI 从源码重建，因此本地 `dist/` 的哈希不能用于上架。
 
 ```bash
-git tag v0.4.0
-git push origin main --tags
-# GitHub → Releases → Draft a new release → 选 v0.4.0 → Publish
+# 先同步递增四处版本源，再为该提交创建新 tag（以 vX.Y.Z 为占位示例）
+git tag vX.Y.Z
+git push origin vX.Y.Z
+# GitHub → Releases → Draft a new release → 选新 tag → Publish
 ```
 
-`.github/workflows/plugin-release.yml` 会复用官方 `plugin-release-reusable.yml`，自动产出并上传三个资产：
+`.github/workflows/plugin-release.yml` 会复用官方 `plugin-release-reusable.yml`，按上表构建五个平台，全部成功后上传五个 `.dbxp` 和一个汇总文件：
 
 | 资产 | 说明 |
 | --- | --- |
-| `io.github.nixing178.jenkins-<version>-windows-x64.dbxp` | 未签名候选包 |
-| `io.github.nixing178.jenkins-<version>-windows-x64.artifact.json` | 目标平台、sha256、size |
+| `io.github.nixing178.jenkins-<version>-<target>.dbxp` | 各平台的未签名候选包，共五个 |
 | `release-candidates.json` | 汇总，供商店同步器读取 |
+
+每个平台还会生成 `.artifact.json` 并作为 Actions 中间产物传递；固定的 `plugin-cli-v0.1.9` 工作流不会单独将这些元数据文件上传到 Release，而是合并到 `release-candidates.json` 的 `artifacts` 数组中。
+
+Fork 协作时，保留上游插件 ID、publisher 和项目链接，将代码与工作流改进通过 PR 贡献回上游。工作流在发布 Release 的当前仓库运行，资产上传到该仓库；在 fork 中发布测试 Release 不会自动更新上游 Release 或官方商店。多平台包是否可下载，以相应 Release 的实际资产为准，不代表历史 Windows-only Release 已补齐其它平台。
 
 **2. 提 catalog PR**
 
 向 `t8y2/dbx-store:main` 提交单个 PR，只加两个文件：
 
 - `publishers/nixing178.json`（首次上架）
-- `candidates/io.github.nixing178.jenkins.json`（`sha256`/`size` 必须取自 CI 产出的 `.artifact.json`）
+- `candidates/io.github.nixing178.jenkins.json`（各平台的 `sha256`/`size` 必须取自 CI 产出的 `release-candidates.json`）
 
 维护者评论 `/sign` 后，签名工作流会回写 `plugins/io.github.nixing178.jenkins.json` 与 `catalog/index.json`，合并即上架。
 签名私钥由商店维护，作者不接触。
@@ -186,7 +206,7 @@ git push origin main --tags
 > 面向最终用户的完整说明（校验和、验收清单、常见问题）：`docs/安装说明书-0.7.5.txt`。
 
 1. DBX → 插件中心 → 设置 → 打开「允许安装未签名开发包」。
-2. 插件中心 → 安装 → 从文件 → 选择 `dist/io.github.nixing178.jenkins-0.7.5-windows-x64.dbxp`。
+2. 插件中心 → 安装 → 从文件 → 选择与当前系统和架构匹配的 `io.github.nixing178.jenkins-<version>-<target>.dbxp`（target 见上表）。
 3. 新建连接，类型选 **Jenkins**，填写地址、端口、用户名与 API Token。
 4. 从 `com.anjun.jenkins` 旧版升级时：两者是不同插件，需先在插件中心卸载旧版，再安装新版。
 

@@ -17,5 +17,13 @@ jobs:
       package-path: dist/*.dbxp
       metadata-path: dist/*.artifact.json
       plugin-cli-version: 0.1.9
-      # 首发只发布 Windows x64；Go sidecar 交叉编译待验证后再扩平台
-      build-matrix: '{"include":[{"runner":"windows-2022","target":"windows-x64"}]}'
+      # Go Sidecar 必须在对应 OS/架构的 runner 上原生打包。
+      # 与固定版本 reusable workflow 的默认平台集合保持一致。
+      build-matrix: >-
+        {"include":[
+          {"runner":"windows-2022","target":"windows-x64"},
+          {"runner":"macos-15-intel","target":"darwin-x64"},
+          {"runner":"macos-15","target":"darwin-arm64"},
+          {"runner":"ubuntu-24.04","target":"linux-x64"},
+          {"runner":"ubuntu-24.04-arm","target":"linux-arm64"}
+        ]}
