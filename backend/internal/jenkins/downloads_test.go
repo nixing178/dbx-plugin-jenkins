@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -327,6 +328,11 @@ func TestArtifactTaskProgressIncrements(t *testing.T) {
 	t.Setenv("DBX_PLUGIN_DATA_DIR", t.TempDir())
 
 	const size = 3 << 20
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseServer := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseServer)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodHead {
 			w.Header().Set("Content-Length", "0")
@@ -334,12 +340,18 @@ func TestArtifactTaskProgressIncrements(t *testing.T) {
 		}
 		w.Header().Set("Content-Length", "3145728")
 		chunk := strings.Repeat("x", 64*1024)
+		paused := false
 		for written := 0; written < size; written += len(chunk) {
 			if _, err := io.WriteString(w, chunk); err != nil {
 				return
 			}
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
+			}
+			// 写满一半后暂停，等测试观察到中间进度再放行，避免回环下载过快导致用例不稳定。
+			if !paused && written+len(chunk) >= size/2 {
+				paused = true
+				<-release
 			}
 		}
 	}))
@@ -351,8 +363,8 @@ func TestArtifactTaskProgressIncrements(t *testing.T) {
 		t.Fatalf("StartArtifactSave() error = %v", err)
 	}
 
-	sawPartial := false
 	deadline := time.Now().Add(5 * time.Second)
+	sawPartial := false
 	for time.Now().Before(deadline) {
 		snapshot, err := client.ArtifactTaskStatus(task.TaskID)
 		if err != nil {
@@ -360,16 +372,31 @@ func TestArtifactTaskProgressIncrements(t *testing.T) {
 		}
 		if snapshot.State == "running" && snapshot.Done > 0 && snapshot.Done < snapshot.Total {
 			sawPartial = true
-		}
-		if snapshot.State != "running" {
-			if snapshot.State != "saved" {
-				t.Fatalf("state = %q (%s), want saved", snapshot.State, snapshot.Error)
-			}
 			break
 		}
-		time.Sleep(5 * time.Millisecond)
+		if snapshot.State != "running" {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
+	releaseServer()
 	if !sawPartial {
-		t.Error("never observed a partial progress snapshot")
+		t.Fatal("never observed a partial progress snapshot")
 	}
+
+	for time.Now().Before(deadline) {
+		snapshot, err := client.ArtifactTaskStatus(task.TaskID)
+		if err != nil {
+			t.Fatalf("ArtifactTaskStatus() error = %v", err)
+		}
+		if snapshot.State == "running" {
+			time.Sleep(2 * time.Millisecond)
+			continue
+		}
+		if snapshot.State != "saved" {
+			t.Fatalf("state = %q (%s), want saved", snapshot.State, snapshot.Error)
+		}
+		return
+	}
+	t.Fatal("download did not finish")
 }
