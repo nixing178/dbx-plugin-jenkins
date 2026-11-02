@@ -3,7 +3,7 @@
   "manifest_version": 1,
   "id": "io.github.nixing178.jenkins",
   "name": "Jenkins Console",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "nixing178",
   "description": "Manage Jenkins jobs, builds, console output, queue and nodes inside DBX.",
   "source": "https://github.com/nixing178/dbx-plugin-jenkins",
@@ -100,6 +100,14 @@
           "default": true
         },
         {
+          "key": "download_dir",
+          "label": "Download directory",
+          "type": "text",
+          "binding": "config",
+          "default": "",
+          "placeholder": "Leave empty for <home>/Downloads"
+        },
+        {
           "key": "insecure_skip_verify",
           "label": "Skip TLS certificate verification",
           "type": "boolean",
@@ -155,6 +163,10 @@
             },
             "api_token": { "label": "API token", "placeholder": "User profile → API Token" },
             "read_only": { "label": "Read-only mode" },
+            "download_dir": {
+              "label": "Download directory",
+              "placeholder": "Leave empty for <home>/Downloads"
+            },
             "insecure_skip_verify": { "label": "Skip TLS certificate verification" },
             "connect_timeout_secs": { "label": "Connect timeout (seconds)" }
           }
@@ -184,6 +196,10 @@
             "username": { "label": "用户名", "placeholder": "留空表示匿名只读访问" },
             "api_token": { "label": "API Token", "placeholder": "用户设置 → API Token" },
             "read_only": { "label": "只读模式" },
+            "download_dir": {
+              "label": "下载目录",
+              "placeholder": "留空表示 <用户目录>/Downloads"
+            },
             "insecure_skip_verify": { "label": "跳过 TLS 证书校验" },
             "connect_timeout_secs": { "label": "连接超时（秒）" }
           }

@@ -1,4 +1,7 @@
 import type {
+  ArtifactChunk,
+  ArtifactInfo,
+  ArtifactTaskSnapshot,
   BatchBuildResult,
   BatchTargetInfo,
   BuildDetail,
@@ -15,6 +18,7 @@ import type {
   NodeInfo,
   Overview,
   QueueItem,
+  SavedFile,
   StageInfo,
   StageMatrix,
   TriggerResult,
@@ -112,6 +116,84 @@ export const jenkinsApi = {
       { job, number, start },
       60_000,
     );
+  },
+
+  /** 制品大小与类型；HEAD 请求，通常几十毫秒。 */
+  artifactInfo(
+    job: string,
+    number: number,
+    path: string,
+    timeoutMs = 30_000,
+  ): Promise<ArtifactInfo> {
+    return invoke<ArtifactInfo>("jenkins/artifactInfo", { job, number, path }, timeoutMs);
+  },
+
+  /**
+   * 制品分块。首块会触发后端把整份制品落盘缓存，所以超时给到 10 分钟；
+   * 下载完成后每块只读本地缓存，剩余分块都在几十毫秒内返回。
+   */
+  artifactChunk(
+    job: string,
+    number: number,
+    path: string,
+    offset: number,
+    length: number,
+    timeoutMs = 600_000,
+  ): Promise<ArtifactChunk> {
+    return invoke<ArtifactChunk>(
+      "jenkins/artifactChunk",
+      { job, number, path, offset, length },
+      timeoutMs,
+    );
+  },
+
+  /**
+   * 启动后台下载任务，立即返回 taskId。
+   * 落盘只能由 sidecar 完成：DBX 工作台的 iframe 没有 allow-downloads。
+   */
+  artifactStart(
+    job: string,
+    number: number,
+    path: string,
+    timeoutMs = 30_000,
+  ): Promise<ArtifactTaskSnapshot> {
+    return invoke<ArtifactTaskSnapshot>("jenkins/artifactStart", { job, number, path }, timeoutMs);
+  },
+
+  /** 轮询下载任务进度；终态后前端停止轮询。 */
+  artifactStatus(taskId: string, timeoutMs = 15_000): Promise<ArtifactTaskSnapshot> {
+    return invoke<ArtifactTaskSnapshot>("jenkins/artifactStatus", { taskId }, timeoutMs);
+  },
+
+  artifactCancel(taskId: string): Promise<{ success: boolean }> {
+    return invoke<{ success: boolean }>("jenkins/artifactCancel", { taskId }, 15_000);
+  },
+
+  /** 在系统文件管理器里定位已落盘的文件。 */
+  revealFile(path: string): Promise<{ success: boolean }> {
+    return invoke<{ success: boolean }>("jenkins/revealFile", { path }, 15_000);
+  },
+
+  /** 当前连接实际使用的下载目录（用于面板提示）。 */
+  downloadDir(): Promise<{ dir: string }> {
+    return invoke<{ dir: string }>("jenkins/downloadDir", {}, 15_000);
+  },
+
+  /** 把文本写成文件放到下载目录（控制台日志导出兜底）。 */
+  saveText(name: string, content: string, timeoutMs = 60_000): Promise<SavedFile> {
+    return invoke<SavedFile>("jenkins/saveText", { name, content }, timeoutMs);
+  },
+
+  /**
+   * 导出**完整**控制台日志：后端直接拉 Jenkins 的 consoleText 流式落盘，
+   * 不受前端内存里那份 2 MB 截断影响；返回任务快照，用 artifactStatus 轮询。
+   */
+  consoleSave(
+    job: string,
+    number: number,
+    timeoutMs = 30_000,
+  ): Promise<ArtifactTaskSnapshot> {
+    return invoke<ArtifactTaskSnapshot>("jenkins/consoleSave", { job, number }, timeoutMs);
   },
 
   trigger(job: string, params: Record<string, unknown> = {}): Promise<TriggerResult> {

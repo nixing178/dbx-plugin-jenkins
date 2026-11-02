@@ -1,3 +1,5 @@
+import type { ArtifactArchive } from "../types";
+
 export type JobKind = "freestyle" | "pipeline";
 
 export type NameErrorKey = "nameRequired" | "nameInvalid";
@@ -77,6 +79,7 @@ export interface JobFormValues {
   description: string;
   disabled: boolean;
   script: string;
+  archive: ArtifactArchive;
 }
 
 export interface JobUpdateFields {
@@ -84,7 +87,20 @@ export interface JobUpdateFields {
   description?: string;
   disabled?: boolean;
   script?: string;
+  archive?: ArtifactArchive;
 }
+
+/** 归档产物的默认值：关闭状态，defaultExcludes 与 Jenkins 一致为 true。 */
+export const DEFAULT_ARTIFACT_ARCHIVE: ArtifactArchive = {
+  enabled: false,
+  files: "",
+  excludes: "",
+  fingerprint: false,
+  onlyIfSuccessful: false,
+  allowEmptyArchive: false,
+  defaultExcludes: true,
+  caseSensitive: false,
+};
 
 /** 只提交发生变化的字段，避免无谓地重写 config.xml。 */
 export function buildJobUpdateFields(
@@ -99,7 +115,32 @@ export function buildJobUpdateFields(
   }
   if (current.disabled !== original.disabled) fields.disabled = current.disabled;
   if (current.script !== original.script) fields.script = current.script;
+  if (!sameArchive(current.archive, original.archive)) {
+    fields.archive = normalizeArchive(current.archive);
+  }
   return fields;
+}
+
+function normalizeArchive(input: ArtifactArchive): ArtifactArchive {
+  return {
+    ...input,
+    files: input.files.trim(),
+    excludes: input.excludes.trim(),
+  };
+}
+
+/** 归档配置逐字段比较；文件模式与排除按 trim 后比较，避免空格触发无谓写入。 */
+function sameArchive(left: ArtifactArchive, right: ArtifactArchive): boolean {
+  return (
+    left.enabled === right.enabled &&
+    left.files.trim() === right.files.trim() &&
+    left.excludes.trim() === right.excludes.trim() &&
+    left.fingerprint === right.fingerprint &&
+    left.onlyIfSuccessful === right.onlyIfSuccessful &&
+    left.allowEmptyArchive === right.allowEmptyArchive &&
+    left.defaultExcludes === right.defaultExcludes &&
+    left.caseSensitive === right.caseSensitive
+  );
 }
 
 export interface ViewFormValues {

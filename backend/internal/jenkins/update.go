@@ -17,6 +17,8 @@ type JobFields struct {
 	Description string `json:"description"`
 	Disabled    bool   `json:"disabled"`
 	Script      string `json:"script"`
+	// Archive 是「归档产物」配置；未配置或 Pipeline 任务为 nil。
+	Archive *ArtifactArchive `json:"archive,omitempty"`
 }
 
 // JobUpdate 描述一次任务编辑；Set* 用于区分「未修改」与「改成空值」。
@@ -29,6 +31,8 @@ type JobUpdate struct {
 	SetDisabled    bool
 	Script         string
 	SetScript      bool
+	Archive        ArtifactArchive
+	SetArchive     bool
 }
 
 // ViewUpdate 描述一次视图编辑。
@@ -53,6 +57,9 @@ type jobConfigDocument struct {
 		Class  string `xml:"class,attr"`
 		Script string `xml:"script"`
 	} `xml:"definition"`
+	Publishers struct {
+		Archivers []artifactArchiverXML `xml:"hudson.tasks.ArtifactArchiver"`
+	} `xml:"publishers"`
 }
 
 type listViewDocument struct {
@@ -91,6 +98,10 @@ func ParseJobFields(xmlText, fullName string) (*JobFields, error) {
 	}
 	if document.Definition != nil {
 		fields.Script = document.Definition.Script
+	}
+	// Pipeline 的归档写在脚本里，publishers 里的同名动作不参与表单。
+	if fields.Kind != string(JobKindPipeline) && len(document.Publishers.Archivers) > 0 {
+		fields.Archive = document.Publishers.Archivers[0].toArchive()
 	}
 	return fields, nil
 }
@@ -143,7 +154,7 @@ func (c *Client) UpdateJob(ctx context.Context, fullName string, update JobUpdat
 		}
 	}
 
-	if !update.SetDescription && !update.SetDisabled && !update.SetScript {
+	if !update.SetDescription && !update.SetDisabled && !update.SetScript && !update.SetArchive {
 		return current, nil
 	}
 
@@ -163,6 +174,11 @@ func (c *Client) UpdateJob(ctx context.Context, fullName string, update JobUpdat
 	}
 	if update.SetScript {
 		if xmlText, err = PatchPipelineScript(xmlText, update.Script); err != nil {
+			return "", err
+		}
+	}
+	if update.SetArchive {
+		if xmlText, err = PatchArtifactArchive(xmlText, update.Archive); err != nil {
 			return "", err
 		}
 	}

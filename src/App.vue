@@ -111,6 +111,9 @@ const connectionName = ref("");
 const identity = ref<Identity | null>(null);
 const readOnly = ref(true);
 
+/** 构建时注入的插件版本，用于一眼识别当前加载的是哪一版 UI。 */
+const appVersion = __APP_VERSION__;
+
 const view = ref<AppView>("overview");
 const folder = ref("");
 const jobs = ref<JobSummary[]>([]);
@@ -1904,6 +1907,7 @@ onBeforeUnmount(() => {
           <span class="subtle" :title="connectionName">{{ connectionLabel }}</span>
         </div>
       </div>
+      <span class="app-version" :title="t('uiVersionHint')">v{{ appVersion }}</span>
 
       <div class="nav-history">
         <button
@@ -2054,6 +2058,7 @@ onBeforeUnmount(() => {
             @back="closeBuild"
             @stop="stopBuild"
             @refresh="refreshCurrent"
+            @notify="showToast"
           />
         </div>
 
@@ -2273,6 +2278,16 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.app-version {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .topbar-right {

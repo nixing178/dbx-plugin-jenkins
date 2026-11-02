@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_ARTIFACT_ARCHIVE,
   buildCreateJobPayload,
   buildCreateViewPayload,
   buildJobUpdateFields,
@@ -124,6 +125,7 @@ describe("buildJobUpdateFields", () => {
     description: "old",
     disabled: false,
     script: "echo old",
+    archive: DEFAULT_ARTIFACT_ARCHIVE,
   };
 
   it("returns only changed fields", () => {
@@ -219,5 +221,56 @@ describe("deleteConfirmationMatches", () => {
     expect(deleteConfirmationMatches(" demo ", "demo")).toBe(true);
     expect(deleteConfirmationMatches("Demo", "demo")).toBe(false);
     expect(deleteConfirmationMatches("", "demo")).toBe(false);
+  });
+});
+
+describe("buildJobUpdateFields · 归档产物", () => {
+  const base = {
+    title: "demo",
+    description: "",
+    disabled: false,
+    script: "",
+    archive: DEFAULT_ARTIFACT_ARCHIVE,
+  };
+
+  it("归档没改动时不提交 archive 字段", () => {
+    const fields = buildJobUpdateFields({ ...base }, { ...base });
+    expect(fields.archive).toBeUndefined();
+    expect(fields).toEqual({});
+  });
+
+  it("改动归档后提交整块配置并 trim 文件模式", () => {
+    const fields = buildJobUpdateFields(
+      {
+        ...base,
+        archive: {
+          ...DEFAULT_ARTIFACT_ARCHIVE,
+          enabled: true,
+          files: "  dist/**/*.jar  ",
+          excludes: " **/*.tmp ",
+        },
+      },
+      { ...base },
+    );
+    expect(fields.archive).toEqual({
+      ...DEFAULT_ARTIFACT_ARCHIVE,
+      enabled: true,
+      files: "dist/**/*.jar",
+      excludes: "**/*.tmp",
+    });
+  });
+
+  it("关闭归档同样提交 enabled=false，以便后端删除该动作", () => {
+    const fields = buildJobUpdateFields(
+      { ...base, archive: { ...DEFAULT_ARTIFACT_ARCHIVE, enabled: false } },
+      { ...base, archive: { ...DEFAULT_ARTIFACT_ARCHIVE, enabled: true, files: "dist/**" } },
+    );
+    expect(fields.archive?.enabled).toBe(false);
+  });
+
+  it("只改描述时不会顺带写 publishers", () => {
+    const fields = buildJobUpdateFields({ ...base, description: "hi" }, { ...base });
+    expect(fields.description).toBe("hi");
+    expect(fields.archive).toBeUndefined();
   });
 });

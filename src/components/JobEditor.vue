@@ -3,11 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import CodeEditor from "./CodeEditor.vue";
 import { t } from "../i18n";
 import {
+  DEFAULT_ARTIFACT_ARCHIVE,
   buildCreateJobPayload,
   buildJobUpdateFields,
   validateName,
 } from "../lib/forms";
 import type {
+  ArtifactArchive,
   CreateJobPayload,
   JobConfigResponse,
   JobDetail,
@@ -43,6 +45,10 @@ const enabled = computed({
   },
 });
 const script = ref(props.config?.fields.script ?? "");
+const archive = ref<ArtifactArchive>({
+  ...DEFAULT_ARTIFACT_ARCHIVE,
+  ...(props.config?.fields.archive ?? {}),
+});
 const xml = ref(props.config?.xml ?? "");
 const error = ref("");
 
@@ -56,6 +62,10 @@ const original = computed(() => ({
   description: props.config?.fields.description ?? "",
   disabled: props.config?.fields.disabled ?? false,
   script: props.config?.fields.script ?? "",
+  archive: {
+    ...DEFAULT_ARTIFACT_ARCHIVE,
+    ...(props.config?.fields.archive ?? {}),
+  },
 }));
 
 const folderLabel = computed(() => props.folder || t("rootFolderPath"));
@@ -92,12 +102,18 @@ function submit(): void {
     return;
   }
 
+  if (archive.value.enabled && !archive.value.files.trim()) {
+    error.value = t("archiveFilesRequired");
+    return;
+  }
+
   const fields = buildJobUpdateFields(
     {
       title: title.value,
       description: description.value,
       disabled: disabled.value,
       script: script.value,
+      archive: archive.value,
     },
     original.value,
   );
@@ -192,6 +208,43 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               <span class="hint">{{ t("enabledHint") }}</span>
             </span>
           </label>
+
+          <div v-if="!isPipeline" class="field archive-field">
+            <label class="checkbox-field">
+              <input v-model="archive.enabled" type="checkbox" class="checkbox" />
+              <span>
+                <strong>{{ t("archiveArtifactsField") }}</strong>
+                <span class="hint">{{ t("archiveArtifactsHint") }}</span>
+              </span>
+            </label>
+
+            <div v-if="archive.enabled" class="archive-grid">
+              <label class="field">
+                <span class="label">{{ t("archiveFiles") }}</span>
+                <input v-model="archive.files" type="text" placeholder="dist/**/*.jar" />
+              </label>
+
+              <label class="field">
+                <span class="label">{{ t("archiveExcludes") }}</span>
+                <input v-model="archive.excludes" type="text" placeholder="**/*.tmp" />
+              </label>
+
+              <div class="archive-flags">
+                <label class="checkbox-field">
+                  <input v-model="archive.fingerprint" type="checkbox" class="checkbox" />
+                  <span>{{ t("archiveFingerprint") }}</span>
+                </label>
+                <label class="checkbox-field">
+                  <input v-model="archive.onlyIfSuccessful" type="checkbox" class="checkbox" />
+                  <span>{{ t("archiveOnlyIfSuccessful") }}</span>
+                </label>
+                <label class="checkbox-field">
+                  <input v-model="archive.allowEmptyArchive" type="checkbox" class="checkbox" />
+                  <span>{{ t("archiveAllowEmpty") }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
 
           <div v-if="isPipeline" class="field">
             <span class="label">{{ t("scriptField") }}</span>
@@ -335,6 +388,27 @@ h2 {
 .note {
   margin: -8px 0 0;
 }
+
+.archive-field {
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.archive-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-left: 26px;
+}
+
+.archive-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+
 
 input:not(.checkbox),
 select,

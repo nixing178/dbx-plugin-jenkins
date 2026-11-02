@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	userAgent   = "dbx-jenkins-plugin/0.10.0"
+	userAgent   = "dbx-jenkins-plugin/0.11.0"
 	maxJSONBody = 8 << 20
 )
 
@@ -40,10 +40,22 @@ type Client struct {
 	readOnly   bool
 	httpClient *http.Client
 	writeClient *http.Client
+	// downloadClient 不设整体超时：大制品可能远超普通请求超时，由调用方用 context 限时。
+	downloadClient *http.Client
 
 	mu      sync.Mutex
 	version string
 	crumb   crumbState
+
+	// 制品缓存按目标文件加锁，避免并发下载同一制品写坏文件。
+	artifactMu    sync.Mutex
+	artifactLocks map[string]*sync.Mutex
+
+	// downloadDir 是连接配置的下载目录；空表示回落到 <home>/Downloads。
+	downloadDir string
+	// tasks 保存后台下载任务，供前端轮询进度。
+	taskMu sync.Mutex
+	tasks  map[string]*artifactTask
 }
 
 // Config 是连接 Jenkins 所需的全部配置。
@@ -54,6 +66,8 @@ type Config struct {
 	ReadOnly           bool
 	InsecureSkipVerify bool
 	Timeout            time.Duration
+	// DownloadDir 是制品落盘目录；留空回落到 <home>/Downloads。
+	DownloadDir string
 }
 
 // Response 是写操作的轻量响应，避免把大响应体留在内存里。
@@ -116,14 +130,21 @@ func NewClient(cfg Config) (*Client, error) {
 			return http.ErrUseLastResponse
 		},
 	}
+	// 制品下载可能几十秒到几分钟，不能套用 15s 的普通请求超时。
+	downloadClient := &http.Client{
+		Transport: transport,
+		Jar:       jar,
+	}
 
 	return &Client{
-		baseURL:     strings.TrimRight(parsed.String(), "/"),
-		username:    cfg.Username,
-		apiToken:    cfg.APIToken,
-		readOnly:    cfg.ReadOnly,
-		httpClient:  httpClient,
-		writeClient: writeClient,
+		baseURL:        strings.TrimRight(parsed.String(), "/"),
+		username:       cfg.Username,
+		apiToken:       cfg.APIToken,
+		readOnly:       cfg.ReadOnly,
+		httpClient:     httpClient,
+		writeClient:    writeClient,
+		downloadClient: downloadClient,
+		downloadDir:    strings.TrimSpace(cfg.DownloadDir),
 	}, nil
 }
 

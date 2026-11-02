@@ -3,7 +3,7 @@
 在 DBX 内管理 Jenkins 任务、构建、控制台日志、队列与节点。
 
 - 插件 ID：`io.github.nixing178.jenkins`
-- 当前版本：`0.10.0`（鼠标侧键控制页面前进 / 后退）
+- 当前版本：`0.11.0`（构建制品下载、归档产物配置、控制台日志全量导出）
 - 形态：Go Sidecar + Vue3 静态工作台
 - 许可证：Apache-2.0
 
@@ -124,6 +124,54 @@ pnpm test
 - 预览页：`pnpm dev` 打开 [`/batch-preview.html`](./batch-preview.html)（`?theme=dark` 切深色），可切换读取中 / 确认 / 执行 / 结果四态。
 
 
+## 归档产物配置
+
+自由风格任务可在「编辑 → 基础」里直接勾选 **Archive the artifacts**：
+
+| 字段 | 说明 |
+| --- | --- |
+| 文件模式 | 必填，Ant 通配符，如 `dist/**/*.jar`（可逗号分隔多个） |
+| 排除 | 可选，如 `**/*.tmp` |
+| 指纹追踪 | 为归档文件记录指纹 |
+| 仅成功时归档 | 构建失败则不归档 |
+| 允许空归档 | 没有匹配文件时不把构建标红 |
+
+实现要点：
+
+- 保存走 **XML 局部改写**，只增删改 `hudson.tasks.ArtifactArchiver`；同一 `<publishers>` 里的 Mailer / JUnit 等动作原样保留，`<publishers/>` 自闭合会自动展开成成对标签。
+- 取消勾选即删除该动作；没动归档字段时保存不会碰 `publishers`。
+- **Pipeline 任务不提供归档表单**：`WorkflowJob extends Job`，没有 `publishers`，归档只能写在脚本里（`archiveArtifacts artifacts: 'dist/**/*.jar'` 或声明式 `post { always { … } }`）；对 Pipeline 调用归档 patch 会被后端拒绝。0.11.0 也不提供「生成/复制语句」工具区——团队统一手写 Pipeline，这块工具只是干扰。
+- 读旧配置时按 Jenkins 默认补齐：`defaultExcludes=true`、`caseSensitive=false`，不会把原语义改掉。
+
+所需权限：`Item/Configure`（与其它任务编辑一致）。
+
+## 制品下载
+
+构建详情页的「产物」区块可直接把制品存到本机：
+
+- 每行显示文件名、相对路径与大小（进页面时并行 HEAD 一次，失败不打扰），右侧「下载」按钮；面板头显示当前下载目录。
+- 点「下载」→ `jenkins/artifactStart` 启动后台任务，前端每 500 ms 轮询 `jenkins/artifactStatus`：按钮显示「保存中 42%」，行下方同步细进度条与明细 `8.5 MB / 20.0 MB · 3.2 MB/s · 剩余 12s`；随时可点「取消」。
+- 速度按最近 4 s 的采样滑动平均（`lib/downloadMetrics.ts`），避免单次轮询抖动；总量未知时只显示已下载量。
+- 下载完成弹一条消息提示：`已保存 app.jar（12.3 MB）`；失败提示 `下载失败：<原因>`；「全部下载」逐条静默、结束时给一条汇总（成功数/总数）。
+- 完成后按钮变「已保存」，下方显示落盘路径（悬停看全路径），并提供「打开文件夹」（资源管理器定位到该文件）与「复制」。
+- 多个产物时面板头出现「全部下载」，顺序执行（不并发抢带宽），进度显示 `下载中 2/5`，单个失败不影响其余。
+- **下载目录可配**：连接配置 `download_dir` 支持绝对路径与 `~/`，留空回落 `<用户目录>\Downloads`；目录不存在自动创建。
+- **不能依赖浏览器下载**：DBX 工作台的 iframe 是 `sandbox="allow-top-navigation allow-same-origin allow-forms allow-scripts …"`，**没有 `allow-downloads`**，`<a download>` 与 Blob 下载会被静默拦截；宿主保存对话框在 0.6.61 上方法名也与文档不一致。所以落盘统一由 sidecar 完成。
+- **同名直接覆盖**：先写 `<name>.part` 再原子 rename，中断不会留下半个文件；文件名做 Windows 非法字符替换，杜绝 `..\` 穿越。
+- 失败在行内显示本地化错误（`not_found` / `timeout` / `network` …），按钮变「重试」。
+- 构建没有归档制品时，「产物」区块显示空态提示（需要 `archiveArtifacts`），不会让人对着控制台的「下载」找制品。
+- 控制台日志导出走 `jenkins/consoleSave`：后端直接拉 Jenkins 的 `consoleText` 流式落盘，**导出的是完整日志**（前端内存里那份只保留尾部约 2 MB），按钮显示 `保存中 42%`，完成后弹「已保存 …」并可「打开文件夹」；老 sidecar 没有该接口时退回内存文本导出。
+- **界面版本可见**：顶栏品牌名旁显示 `v0.11.0`（编译时由 `package.json` 注入），升级后一眼能确认加载的是新 UI 还是缓存的旧页面。
+
+后端实现要点：
+
+- `jenkins/artifactInfo` 用 HEAD 取大小与类型；HEAD 不带 `Content-Length`（反代 / 老版本）时回退到「下载后 stat」。
+- `jenkins/artifactStart` 建任务（taskId → state/done/total/path），后台 goroutine 拉取并落盘；`artifactStatus` 读快照，`artifactCancel` 用 context 打断——拉取与本地复制都每 256 KiB 检查一次取消，取消后清理 `.part`。
+- 制品首次下载会**流式落盘**到 `DBX_PLUGIN_DATA_DIR/artifacts/<sha1>.bin`（独立 10 分钟超时、不占内存），再复制到 Downloads；重复下载直接命中缓存。
+- 缓存按 mtime 清理到 512 MiB，命中缓存时刷新 mtime；同一制品的并发请求按目标文件加锁，只下一次。
+- 制品路径逐段转义，空段 / `.` / `..` / 反斜杠 / 绝对路径在 RPC 层与客户端双重拒绝。
+- 下载是 GET：只读连接照常可用，只读守卫不参与。
+
 ## 页面前进 / 后退
 
 鼠标侧键（后退 / 前进）可以逐屏回退与复原；topbar 品牌名右侧有一对等价箭头，不可用时置灰。
@@ -167,7 +215,13 @@ cd E:\DBX插件开发\Jenkins
 node scripts/check-version.mjs          # manifest / package.json / main.go / UA 版本必须一致
 pnpm build
 npx --yes @dbx-app/plugin-cli@0.1.9 package .
-node scripts/verify-sidecar-identity.mjs dist\dbx-plugin-jenkins.exe   # 校验后端 identity
+
+# 校验包内 sidecar 的 identity：打包 CLI 只把后端写进 .dbxp，
+# dist\dbx-plugin-jenkins.exe 是旧流程残留，可能是旧版本，不能拿来校验。
+$pkg = "dist\io.github.nixing178.jenkins-0.11.0-windows-x64.dbxp"
+Copy-Item $pkg "$env:TEMP\jenkins.dbxp.zip" -Force
+Expand-Archive "$env:TEMP\jenkins.dbxp.zip" "$env:TEMP\jenkins-dbxp" -Force
+node scripts/verify-sidecar-identity.mjs "$env:TEMP\jenkins-dbxp\bin\windows-x64\dbx-plugin-jenkins.exe"
 ```
 
 > **版本号必须同步**：DBX 会比对 `manifest.version` 与 sidecar `plugin/initialize` 返回的版本，
@@ -281,10 +335,22 @@ git push origin main --tags
 | M13 批量构建 v3 | 已完成（0.9.0：`jenkins/batchInspect` 预检、共享参数一次填写全批生效、跨视图选择与「含 M 个其它视图」提示、确认后退出多选；176 后端 + 336 前端用例全绿） |
 | M13b 参数区只留开关 | 已完成（0.9.1：共享参数按类型过滤为 Boolean，其余参数各任务用默认值；移除 conflicts 机制；336 前端用例全绿） |
 | M13c 概览页自动刷新 | 已完成（0.9.2：活跃 5s / 空闲 30s 双档、概览数字与执行器明细一轮并行、概览页徽章与按钮三态；344 前端用例全绿） |
+| M14 制品下载 | 已完成（0.11.0：原生保存对话框分块写盘 \+ Blob 兜底，后被 sidecar 方案取代；后端落盘缓存与 512 MiB 预算、4 MiB 分块；195 后端 \+ 384 前端用例全绿） |
+| M14b 制品下载修复 | 已完成（0.11.0：`normalizeFileTransfer` 兼容 `beginFileSave` 家族） |
+| M14c 落盘改为 sidecar | 已完成（0.11.0：沙箱无 `allow-downloads`，制品与控制台日志改由 sidecar 写入 Downloads；202 后端 \+ 376 前端用例全绿） |
+| M15 下载体验优化 | 已完成（0.11.0：任务化进度 500ms 轮询、取消、打开文件夹、全部下载、`download_dir` 可配、同名覆盖；211 后端 \+ 382 前端用例全绿） |
+| M15b 版本徽章与空态 | 已完成（0.11.0：顶栏显示 UI 版本、无归档制品给空态提示） |
+| M16 归档产物配置 | 已完成（0.11.0：任务编辑可配 Archive the artifacts，XML 局部改写保留其它 publishers；225 后端 \+ 386 前端用例全绿） |
+| M16b Pipeline 归档片段 | 已完成 → **已移除**（该工具在内部迭代中引入后按使用反馈删除；对外 0.11.0 不含，Pipeline 归档统一手写脚本） |
+| M17 下载进度与通知 | 已完成（0.11.0：4s 滑动平均速度、已下载/总量、剩余时间；完成/失败/批量汇总消息提示；403 前端用例全绿） |
+| M18 控制台日志导出 | 已完成（0.11.0：`consoleSave` 全量落盘 + 进度百分比 + 完成通知 + 打开文件夹；229 后端 \+ 403 前端用例全绿） |
+| M18b 移除 Pipeline 归档工具 | 已完成（0.11.0：按用户选择整块删除，Pipeline 归档手写脚本；394 前端用例全绿） |
+
+> 0.11.0 为对外唯一版本号；M14–M18b 的内部迭代号（0.11.0–0.16.1）不再对外使用，逐版本验收记录见 [`docs/test-evidence.md`](./docs/test-evidence.md)。
 
 > 任务列表已按 Jenkins 原生 Views 分组：顶部 Tab 切换视图，视图内分「文件夹 / 任务」两组。
 > Tab 溢出时左右箭头滚动，当前视图自动居中；打开视图自动选中首个任务；左栏宽 320px。
-> 当前测试基线：176 后端用例（`go test ./...`）+ 344 前端用例。
+> 当前测试基线：229 后端用例（`go test ./...`）+ 394 前端用例。
 >
 > Pipeline 创建依赖 Jenkins 的 `workflow-job` / `workflow-cps` 插件；实例未安装时 Jenkins 返回 500，插件会给出去敏的 HTML 错误提示，不会创建半成品任务。
 

@@ -93,6 +93,40 @@ export interface Artifact {
   relativePath: string;
 }
 
+/** 制品元信息（后端 HEAD 制品 URL 得到，缺失长度时回退到下载后 stat）。 */
+export interface ArtifactInfo {
+  fileName: string;
+  size: number;
+  contentType?: string;
+}
+
+/** 制品分块：dataBase64 为原始字节的 base64，单块上限 4 MiB。 */
+export interface ArtifactChunk {
+  offset: number;
+  length: number;
+  total: number;
+  eof: boolean;
+  dataBase64: string;
+}
+
+/** sidecar 落盘结果：path 是用户机器上的绝对路径。 */
+export interface SavedFile {
+  path: string;
+  fileName: string;
+  size: number;
+}
+
+/** 后台下载任务快照；state 为 running / saved / failed / canceled。 */
+export interface ArtifactTaskSnapshot {
+  taskId: string;
+  state: string;
+  done: number;
+  total: number;
+  fileName?: string;
+  path?: string;
+  error?: string;
+}
+
 export interface BuildDetail extends BuildSummary {
   estimatedDuration: number;
   fullDisplayName: string;
@@ -245,6 +279,22 @@ export interface JobFields {
   description: string;
   disabled: boolean;
   script: string;
+  /** 「归档产物」配置；未配置或 Pipeline 任务为 null。 */
+  archive?: ArtifactArchive | null;
+}
+
+/** 归档产物（Archive the artifacts）的可编辑字段。 */
+export interface ArtifactArchive {
+  enabled: boolean;
+  /** 文件模式（Ant 通配符），例如 dist 目录下所有 jar。 */
+  files: string;
+  /** 排除模式，逗号分隔。 */
+  excludes: string;
+  fingerprint: boolean;
+  onlyIfSuccessful: boolean;
+  allowEmptyArchive: boolean;
+  defaultExcludes: boolean;
+  caseSensitive: boolean;
 }
 
 export interface JobConfigResponse {
@@ -270,6 +320,7 @@ export interface JobUpdateFields {
   description?: string;
   disabled?: boolean;
   script?: string;
+  archive?: ArtifactArchive;
 }
 
 export interface ViewUpdateFields {

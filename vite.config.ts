@@ -1,9 +1,16 @@
 import { defineConfig } from "vitest/config";
 import vue from "@vitejs/plugin-vue";
 import { viteSingleFile } from "vite-plugin-singlefile";
+import { version } from "./package.json";
+
+// 版本号从 package.json 注入界面，用于一眼判断当前加载的是哪一版 UI。
+// package.json 与 manifest.json 的一致性由 scripts/check-version.mjs 把关。
 
 export default defineConfig({
   base: "./",
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+  },
   plugins: [vue(), viteSingleFile()],
   build: {
     outDir: "ui",

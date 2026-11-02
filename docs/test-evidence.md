@@ -2,6 +2,10 @@
 
 > 后端 `go test` 与前端 `pnpm test` 按 TDD 红→绿推进，每轮结果记录如下。
 
+> **版本号重编（2026-11-02）**：0.10.0 之后的制品下载、归档配置、控制台导出等功能，此前按内部迭代号 `0.11.0`–`0.16.1` 记录，均未正式发布（未提交 Git、未进商店）。现统一收敛为对外版本 **`0.11.0`**。下文 `0.11.0`–`0.16.1` 段落保留原始验收记录，其编号仅代表内部迭代顺序，不代表对外发布号；对外产物以 `0.11.0` 重新打包。
+
+> **0.11.0 安装验收（2026-11-02）**：新包 `io.github.nixing178.jenkins-0.11.0-windows-x64.dbxp`（sha256 `e52c648b585d5f49c814c4cfe0762158767d196c85ad3b609b3183b04c208a30`）已在 DBX 安装并激活。落盘证据：`%APPDATA%\com.dbx.app\plugins\io.github.nixing178.jenkins\versions\0.11.0` 的 `manifest.version=0.11.0`、`ui/index.html` 哈希 `bd43e1362af206ed54e91de6c844644c7334623c6497850a14ef0e33769c3be5`（与本地构建一致）、sidecar identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.11.0`；activation 记录时间 2026-11-02 10:10。
+
 ## 环境
 
 | 项 | 值 |
@@ -1439,3 +1443,353 @@ pnpm build      # [check-version] ok: 0.7.5，ui/index.html 249.45 kB
 - 2026-10-26 12:00，源哥在 DBX 宿主内实测：**鼠标侧键前进 / 后退工作正常**（安装 0.10.0 包后验证）。
 - 说明双通道至少一条生效；具体走 DOM 通道还是 `popstate` 未取日志确认（两条路径互为兜底，不影响使用）。
 - 预览截图未出：Headless Chrome 在本机启动即退出（无输出），CDP 无法连接。
+
+## 0.11.0 构建制品下载
+
+### 方案
+
+见 `docs/plan-artifact-download.md`（D1:1 / D2:1 / D3:1 / D4:1 / D5:1 / D6:1）：
+
+- 后端 `internal/jenkins/artifacts.go`：`ArtifactPath` 逐段 `url.PathEscape`；`GetArtifactInfo` 先 HEAD、拿不到长度回退「下载后 stat」；`GetArtifactChunk` 首次把整份制品流式落盘到 `DBX_PLUGIN_DATA_DIR/artifacts/<sha1>.bin`，之后按 offset 读本地缓存；`pruneArtifactCache` 按 mtime 压到 512 MiB。
+- 后端 `client.go`：新增无总超时的 `downloadClient`（普通请求仍是 15s），制品缓存按目标文件加锁避免并发写坏。
+- 后端 `rpc/service.go`：`jenkins/artifactInfo` / `jenkins/artifactChunk`，`path` 非法路径落到 `ErrInvalidConfig` → `-32602`。
+- 前端 `src/lib/artifacts.ts`：`downloadArtifact` 有 `fileTransfer` 走 `beginSave` + 4 MiB 分块 `write` + `finish`，无则 Blob 兜底（64 MiB 上限）；`empty_chunk` / `too_large` 为结构化错误。
+- 前端 `BuildView.vue`：产物行显示大小（进页面 HEAD 预取，失败的 key 不重试）、下载按钮、`下载中 N%`、行内进度条、失败红字与重试。
+
+### 测试
+
+- 红图（2026-10-30，本会话执行，实现前）：
+  - `go test ./internal/jenkins -run "Artifact|PruneArtifactCache"` → 9 failed（`ArtifactPath` 返回 not implemented、HEAD/回退/分块/越界/404/缓存清理全部断言失败）；
+  - `go test ./internal/rpc -run Artifact` → 3 failed（`method not found: jenkins/artifactInfo` 等）；
+  - `pnpm test -- src/lib/artifacts.test.ts` → `Tests 11 failed (11)`；
+  - `go vet ./...` 与 `pnpm typecheck` 均 exit 0（红在断言层，不是编译层）。
+  - 两个用例在红图阶段为「假通过」并已如实记录：`TestArtifactPathRejectsUnsafeInput`（桩函数一律报错）、`TestArtifactCacheDirUsesPluginDataDir`（环境变量直接拼接）。
+- 绿图（同日）：
+  - `go test ./...` → `internal/jenkins ok`、`internal/rpc ok`（195 个顶层用例，含 13 条新增）；
+  - `pnpm test` → `Test Files 25 passed (25)`、`Tests 384 passed (384)`（+11，无回归）；
+  - `pnpm typecheck` → exit 0；
+  - `pnpm build` → `[check-version] ok: 0.11.0`，`ui/index.html 284.85 kB`（+3.16 kB）。
+
+### 打包（0.11.0）
+
+- 命令链：`node scripts/check-version.mjs` → `pnpm build` → `npx --yes @dbx-app/plugin-cli@0.1.9 package .`；输出 `Signature: unsigned review candidate`。
+- 产物：`dist/io.github.nixing178.jenkins-0.11.0-windows-x64.dbxp`，6,423,334 B，
+  sha256 `ffca7ed05c1a22d6555b75019b4f60ca672fb1e81b362a2479f6089a9dec2392`（与 `.artifact.json` 一致）。
+- 包内 6 条目：`checksums.json` 526、`manifest.json` 7,485、`assets/plugin.svg` 477、
+  `assets/connection.svg` 762、`bin/windows-x64/dbx-plugin-jenkins.exe` 11,219,968、`ui/index.html` 287,926。
+- `checksums.json` 五个 sha256 逐个复核通过；包内 `ui/index.html` 与本地 `ui/index.html` 哈希同为
+  `c36acacd72b48909ca2e93e5d835e85885ac675f669c93ae284a5e5329447bc8`（逐字节一致），manifest 为 0.11.0。
+- sidecar identity：从包内取出的 exe 走 `plugin/initialize` 握手 → `[verify-sidecar] ok: io.github.nixing178.jenkins/0.11.0`；
+  二进制内 `0.11.0` ×2（Metadata + UA）、`0.10.0` ×0。
+- sidecar 体积从 0.10.0 的 8,609,792 B 涨到 11,219,968 B：本次工具链为 Go 1.27.0，功能代码只增加约 12 KB，差异来自编译器/工具链而非业务代码。
+- **踩坑**：`dist/dbx-plugin-jenkins.exe` 是 0.4.2 的旧残留（打包 CLI 不再写这个位置），拿它跑 identity 会误报
+  `version mismatch: backend=0.4.2`；README 的校验步骤已改为从 .dbxp 解包后校验。
+
+### 未完成
+
+- 真实 Jenkins 制品下载的人工验收（原生保存对话框、字节一致、只读连接、构建中制品缺失）尚未执行，需在 DBX 0.6.61 宿主内装 0.11.0 点一次。
+- 0.11.0 未发版、未提交 Git。
+
+## 0.11.1 修复：点击「下载」无反应
+
+### 诊断
+
+用户装 0.11.0 后点制品行「下载」无任何反馈。本机 DBX 0.6.61 前端 bundle（`EBWebView\Default\Code Cache\js`）取证：
+
+- `fileTransfer` 只以 **capability 标志位**出现：`pick / beginSave / read / drop / folderExpansion`；
+- 运行时桥接方法是 `host.pickFiles` / `host.beginFileSave` / `host.writeFileChunk` / `host.finishFileSave` / `host.closeFileHandle`，配错误文案 `Host file handling is unavailable`、`Plugin write chunk exceeds 8 MiB`；
+- 整个 bundle 中 `beginSave` 仅出现 1 次（标志位），**没有** `beginSave` 方法。
+
+结论：`resolveFileTransfer()` 判断 `typeof transfer.beginSave === "function"` 在 0.6.61 上恒为假 → 静默降级到 Blob + `<a download>`，沙箱 iframe 吞掉下载 → 点击无反应。
+
+### 修复
+
+- `src/lib/artifacts.ts`：新增 `normalizeFileTransfer(raw)`，`beginSave/write/finish/cancel` 与 `beginFileSave/writeFileChunk/finishFileSave/closeFileHandle` 两套命名都认，保留 `this`；缺 begin/write/finish 判为不支持，cancel 缺失为空操作。
+- `src/components/BuildView.vue`：改用适配器；浏览器兜底的结果显示「已交给浏览器下载」，不再与「已保存」混为一谈。
+- `src/dbx.d.ts`：两套方法名都声明为可选并注明必须过适配器。
+- 版本 0.11.0 → 0.11.1（四处同步）。
+
+### 测试
+
+- 红：新增 6 条 `normalizeFileTransfer` 用例，实现前 `Tests 6 failed`（`normalizeFileTransfer is not a function`）。
+- 绿：`pnpm test -- src/lib/artifacts.test.ts` → `Tests 17 passed (17)`；全量 `Test Files 25 passed (25)`、`Tests 390 passed (390)`（+6，无回归）。
+- `pnpm typecheck` exit 0；`go test ./...` → `internal/jenkins ok`、`internal/rpc ok`。
+- `pnpm build` → `[check-version] ok: 0.11.1`，`ui/index.html 285.47 kB`。
+
+### 打包（0.11.1）
+
+- `dist/io.github.nixing178.jenkins-0.11.1-windows-x64.dbxp`，6,423,588 B，
+  sha256 `356fd35df383422e2f3654b34fa6fdf35794d50ec096df5bd2d690361a2615d1`（与 `.artifact.json` 一致）。
+- 包内 6 条目；`ui/index.html` 288,559 B 与本地同哈希 `42bc583b…7936b9f`；
+  sidecar 11,219,968 B，identity 握手 `[verify-sidecar] ok: io.github.nixing178.jenkins/0.11.1`。
+
+### 遗留
+
+- 用户侧复测未做：需装 0.11.1 再点一次。若按钮进入「下载中」后没弹对话框，说明适配到了错误签名；若显示「已交给浏览器下载」但没有文件，说明该机器根本没有 `fileTransfer`，需补「后端落盘到下载目录」的第三条路径。
+
+## 0.11.2 修复：下载改由 sidecar 落盘
+
+### 诊断（用户复测 0.11.1 仍无反应）
+
+本机 DBX 0.6.61 bundle 中 workbench iframe 的 sandbox 属性：
+
+```text
+iframe ... srcdoc ... sandbox="allow-top-navigation allow-same-origin allow-forms allow-scripts ..."
+```
+
+没有 `allow-downloads` → 沙箱内 `<a download>` / Blob 下载被静默拦截，既不报错也不落盘。0.11.0 起控制台日志的「下载」其实也一直无效。
+
+### 修复
+
+- 后端新增 `internal/jenkins/downloads.go`：`DownloadDir()`（`<home>/Downloads`，缺失退回 home）、`SaveArtifact`（缓存 → Downloads，重名 `app (1).jar`，文件名过滤 `\ / : * ? " < > |`）、`SaveText`。
+- RPC 新增 `jenkins/artifactSave`（job/number/path）与 `jenkins/saveText`（name/content）。
+- 前端：`BuildView` 点下载直接调 `artifactSave`，按钮「保存中…」→「已保存」，行内显示 `…\Downloads\app.jar`（悬停全路径 + 复制）；`ConsoleView` 日志导出改调 `saveText`，失败才退回复制。
+- 删除 `src/lib/artifacts.ts` 与其 17 条用例（fileTransfer/Blob 编排在沙箱内不可用），`formatBytes` 移入 `lib/format.ts`，新增 `shortenPath`。
+
+### 测试
+
+- 红：`go test ./internal/jenkins -run "Save|DownloadDir"` → 5 failed；`go test ./internal/rpc -run "ArtifactSave|SaveText"` → 2 failed。
+- 绿：`go test ./...` → `internal/jenkins ok`、`internal/rpc ok`（202 顶层用例，+7）；`pnpm test` → `Test Files 24 passed (24)`、`Tests 376 passed (376)`；`pnpm typecheck` / `go vet ./...` exit 0。
+- `pnpm build` → `[check-version] ok: 0.11.2`，`ui/index.html 283.55 kB`。
+
+### 打包（0.11.2）
+
+- `dist/io.github.nixing178.jenkins-0.11.2-windows-x64.dbxp`，6,431,539 B，
+  sha256 `e531fa8ac0dfc67147ce1c04e189f43eb8b2db2c3ea0f0459937428d62432c83`。
+- 包内 6 条目；`ui/index.html` 286,610 B 与本地同哈希 `4ec90f6a…b136a4`；
+  sidecar 11,236,864 B，identity 握手 `[verify-sidecar] ok: io.github.nixing178.jenkins/0.11.2`。
+
+### 遗留
+
+- 用户侧复测未做：装 0.11.2 后点「下载」，应在 `C:\Users\<用户>\Downloads` 出现制品，界面显示「已保存 + 路径」。
+- 若 RPC 失败，行内会出现具体错误码（`not_found` / `timeout` / `network`），据此可继续定位。
+
+## 0.12.0 制品下载体验优化
+
+### 方案
+
+见 `docs/plan-artifact-download-optimize.md`（D1:1 / D2:1 / D3:2 / D4:1 / D5:2 / D6:1 / D7:1）：
+
+- 后端新增任务化下载：`artifactStart`（taskId）→ `artifactStatus`（state/done/total/path）→ `artifactCancel`（context 打断，清 `.part`）；`prepareArtifactWithProgress` 每 256 KiB 上报。
+- `download_dir` 连接字段：留空回落 `<home>/Downloads`、支持 `~/`、拒绝相对路径、自动建目录。
+- 同名覆盖：`.part` + `os.Rename` 原子替换，不再产生 `(1)` 副本。
+- `jenkins/revealFile`：Windows `explorer /select`、macOS `open -R`、Linux `xdg-open`。
+- 前端 500 ms 轮询：按钮「保存中 42%」+ 行内进度条 + 「取消」；完成后「已保存 + 路径 + 打开文件夹 / 复制」；面板头「全部下载」顺序执行并显示 `2/5`。
+
+### 测试
+
+- 红：后端 9 条（覆盖写、配置目录、`resolveDownloadDir`、任务进度、取消、未知任务、reveal、进度递增）+ RPC 2 条 + 前端 6 条，实现前全部失败。
+- 绿：`go test ./...` → `internal/jenkins ok`、`internal/rpc ok`（211 顶层用例，+9）；`pnpm test` → `Test Files 25 passed`、`Tests 382 passed`（+6）；`pnpm typecheck` / `go vet ./...` exit 0。
+- `pnpm build` → `[check-version] ok: 0.12.0`，`ui/index.html 287.78 kB`。
+
+### 打包（0.12.0）
+
+- `dist/io.github.nixing178.jenkins-0.12.0-windows-x64.dbxp`，6,531,871 B，
+  sha256 `3a22634edeb18f90a955315c7dc4066a82a62b60a41364c8bf496f9978db4639`。
+- 包内 6 条目；manifest 8,029 B（含 `download_dir` 字段与中英本地化）；`ui/index.html` 290,879 B 与本地同哈希 `b3e9339b…7bbf14`；
+  sidecar 11,415,040 B，identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.12.0`。
+
+### 遗留
+
+- 真机验收未做：需装 0.12.0 后确认进度条前进、取消后无残留 `.part`、「打开文件夹」能定位文件、「全部下载」5 个产物的顺序与失败隔离。
+- 缓存策略按 D7 保持 512 MiB；若后续觉得双份磁盘占用明显，再切 D7:2（落盘后删缓存）。
+
+## 0.12.1 界面版本徽章与无制品空态
+
+### 背景
+
+0.12.0 安装后用户反馈「改动未生效」。取证：
+
+- 正在运行的 sidecar 已是 `versions\0.12.0\bin\…\dbx-plugin-jenkins.exe`；
+- 但 WebView UI 缓存里 `全部下载 / artifactStart / 打开文件夹` 命中数为 0，说明新界面从未加载（DBX 进程自 10:57 未重启，工作台 iframe 还是旧 HTML）；
+- 用户截图里的「下载」是**控制台日志导出**，且已实际写出 `C:\Users\anjun\Downloads\schedule-admin-469.log`（201,501 B）；该构建没有归档制品，页面根本没有「产物」区块。
+
+### 修复
+
+- `vite.config.ts` 从 `package.json` 注入 `__APP_VERSION__`，顶栏品牌名旁显示 `v0.12.1`；`src/dbx.d.ts` 在 `declare global` 中声明，避免模块作用域失效。
+- `BuildView.vue` 新增无产物空态面板：「本构建没有归档制品。构建里执行 archiveArtifacts 后才会在这里列出文件。」
+- 版本 0.12.0 → 0.12.1（四处同步）。
+
+### 测试
+
+- `pnpm typecheck` exit 0（首轮报了 `__APP_VERSION__` 未找到与 `node:fs` 缺类型，改为全局声明 + 直接 import package.json 后通过）。
+- `pnpm test` → `Test Files 25 passed (25)`、`Tests 382 passed (382)`（本次为纯展示改动，无新增用例）。
+- `pnpm build` → `[check-version] ok: 0.12.1`，`ui/index.html 288.52 kB`；产物内确认含 `0.12.1` 与「本构建没有归档制品」。
+
+### 打包（0.12.1）
+
+- `dist/io.github.nixing178.jenkins-0.12.1-windows-x64.dbxp`，6,532,181 B，
+  sha256 `6570fa2b57c6a38d1d273e8fe69d98db46c5e138689b3b274ed2881604df7fe7`。
+- 包内 `ui/index.html` 291,687 B 与本地同哈希 `90c7b35a…1f15ba`；
+  sidecar identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.12.1`。
+
+### 遗留
+
+- 真机验收：装 0.12.1 并**重启 DBX**（或关闭工作台标签重开）后，顶栏应出现 `v0.12.1`；这是判断新 UI 是否真正加载的唯一可靠信号。
+
+## 0.13.0 任务配置「归档产物」
+
+### 方案
+
+见 `docs/plan-job-artifact-archive.md`（D1:1 / D2:1 / D3:1 / D4:1 / D5:1 / D6:0.13.0）：
+
+- 后端 `archive.go`：`ArtifactArchive` + `PatchArtifactArchive`（增/改/删 `hudson.tasks.ArtifactArchiver`，保留其它 publishers，自闭合 `<publishers/>` 展开）+ `findChildSpan`（片段内定位直接子元素）。
+- 解析：`jobConfigDocument.Publishers.Archivers`，读写缺省值跟 Jenkins 对齐（`defaultExcludes=true`、`caseSensitive=false`）。
+- Pipeline：`ParseJobFields` 返回 `archive: nil`；对 `flow-definition` 调用 patch 返回 `invalid_config`。
+- RPC：`jobUpdate` 映射 `fields.archive`，`defaultExcludes` 缺省 true。
+- 前端：`JobEditor` 新增「归档产物」区（开关 / 文件模式 / 排除 / 指纹 / 仅成功 / 允许空归档），启用但未填模式时前端拦截；Pipeline 显示脚本提示。
+
+### 测试
+
+- 红：后端 11 条（解析 4、patch 6、UpdateJob 1）+ RPC 3 条 + 前端 4 条，实现前全部失败（`artifact archive is not implemented yet` / `archive = nil` / `expected undefined to deeply equal …`）。
+- 绿：`go test ./...` → `internal/jenkins ok`、`internal/rpc ok`（225 顶层用例，+14）；`pnpm test` → `Test Files 25 passed`、`Tests 386 passed`（+4）；`pnpm typecheck` / `go vet ./...` exit 0。
+- `pnpm build` → `[check-version] ok: 0.13.0`，`ui/index.html 292.18 kB`。
+
+### 打包（0.13.0）
+
+- `dist/io.github.nixing178.jenkins-0.13.0-windows-x64.dbxp`，6,548,034 B，
+  sha256 `35bc5e026e638a479b89da5fc3ed0bc9a1c1ca4ac973c52774f00f1811ba765d`。
+- 包内 6 条目；`ui/index.html` 295,491 B 与本地同哈希 `0188c288…053723`；
+  sidecar 11,435,520 B，identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.13.0`。
+
+### 遗留
+
+- 真机验收未做：需装 0.13.0 + 重启 DBX 后，在自由风格任务的「编辑 → 基础」勾选归档、填 `dist/**/*.jar`，保存后到 Jenkins 任务页确认 Post-build Actions 出现 Archive the artifacts；跑一次构建看「产物」区块是否列出文件。
+- 未做「已完成构建补归档」：Jenkins 核心没有该接口，需要服务端插件支持。
+
+## 0.14.0 Pipeline 归档步骤生成
+
+### 背景
+
+用户问「Pipeline 任务不行吗」。查 `jenkinsci/workflow-job-plugin` 的 `WorkflowJob.java`：
+
+```java
+public final class WorkflowJob extends Job   // hudson.model.Job，不是 AbstractProject
+```
+
+全类没有 `publishers` 字段/`getPublishers()`，因此 Pipeline 没有 Post-build Actions，往 `config.xml` 写 `ArtifactArchiver` 不会生效。归档只能用 step。按拍板 D7=A 做「复制片段」，不自动改脚本。
+
+### 实现
+
+- 新增 `src/lib/archiveSnippet.ts`：`buildArchiveSnippet`（固定参数顺序、Groovy 转义、空模式返回空串）、`hasArchiveArtifacts`（`\barchiveArtifacts\b`）、`isDeclarativePipeline`（`^\s*pipeline\s*\{`）。
+- `JobEditor.vue`：Pipeline 的「归档产物」区改为步骤生成器（文件模式 / 排除 / 指纹 / 仅成功 / 允许空归档 → 实时预览 → 一键复制）；脚本已含该步骤时显示「已存在」；按声明式 / 脚本式区分粘贴位置提示；Pipeline 提交不写 `publishers`。
+
+### 测试
+
+- 红：`archiveSnippet.test.ts` 9 条全部失败（`not implemented yet`）。
+- 绿：`pnpm test` → `Test Files 26 passed`、`Tests 395 passed`（+9）；`pnpm typecheck` exit 0；后端未改动（225 用例仍全绿）。
+- `pnpm build` → `[check-version] ok: 0.14.0`，`ui/index.html 295.83 kB`。
+
+### 打包（0.14.0）
+
+- `dist/io.github.nixing178.jenkins-0.14.0-windows-x64.dbxp`，6,548,922 B，
+  sha256 `c29a9aab6f10071fe08a2f25988efd677cfc58ab41731f15253617cd24a3db94`。
+- 包内 `ui/index.html` 与本地同哈希 `ef216d8a…b83918`；
+  sidecar identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.14.0`。
+
+### 遗留
+
+- 真机验收未做：装 0.14.0 并重启 DBX 后，打开 Pipeline 任务编辑 → 归档产物区填 `dist/**/*.jar` → 复制语句 → 粘进 `steps` / `post` → 保存并构建，产物面板应列出文件。
+
+## 0.15.0 下载进度明细与完成通知
+
+### 需求
+
+1. 下载完成发送消息通知；2. 进度提示要有速度与已下载量。
+
+### 实现
+
+- 新增 `src/lib/downloadMetrics.ts`：
+  - `averageSpeed`：最近 4 s 采样滑动平均，样本不足/进度未前进返回 0；
+  - `remainingSeconds`：剩余字节 ÷ 速度向上取整，未知返回 null；
+  - `transferSummary`：`{bytes: "8.5 MB / 20.0 MB", speed: "3.2 MB/s", etaSeconds}`，总量未知时只给已下载量。
+- `BuildView.vue`：每 500 ms 轮询采样 `{done, at}`（最多 16 条），速度与 ETA 存进聚合行状态；副行显示 `8.5 MB / 20.0 MB · 3.2 MB/s · 剩余 12s`，未知项省略；取消/完成/换构建/卸载时清空采样。
+- 通知：`emit("notify", text, tone)` → `App` 复用 toast 队列（`showToast`）。单条下载完成 `已保存 app.jar（12.3 MB）`、失败 `下载失败：<原因>`；「全部下载」逐条静默，结束一条汇总 `全部下载完成：成功 4/5`。
+
+### 测试
+
+- 红：`downloadMetrics.test.ts` 8 条全部失败（`not implemented yet`）。
+- 绿：`pnpm test` → `Test Files 27 passed`、`Tests 403 passed`（+8）；`pnpm typecheck` exit 0；后端未改动（225 用例仍全绿）。
+- `pnpm build` → `[check-version] ok: 0.15.0`，`ui/index.html 298.16 kB`。
+
+### 打包（0.15.0）
+
+- `dist/io.github.nixing178.jenkins-0.15.0-windows-x64.dbxp`，6,549,730 B，
+  sha256 `8e474b565632a2d68ad58d39b77bb118db934451589c0bc5620b748e78018b1c`。
+- 包内 `ui/index.html` 301,620 B 与本地同哈希 `7ad68d0b…e3843`；
+  sidecar identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.15.0`。
+
+### 遗留
+
+- 真机验收未做：装 0.15.0 + 重启 DBX 后，下载大制品确认副行速度/已下载量持续更新、完成后右上角出现「已保存 …」提示；「全部下载」结束只出现一条汇总。
+- 速度是前端按轮询采样估算，若后端首块一次性拉完整份制品（Jenkins 响应无 `Content-Length`），可能只在结束时跳一次；此时不显示速度。
+
+## 0.16.0 控制台日志导出改造
+
+### 问题
+
+截图箭头指向控制台工具栏的「下载」。原实现把**前端内存里的日志文本**（上限 2,000,000 字符，超出只留尾部）发给 `jenkins/saveText`，因此：
+
+- 大构建导出的日志是被截断的，不是 Jenkins 上的完整日志；
+- 导出过程没有进度，只有按钮变成「保存中…」；
+- 完成后没有消息提示，也没有打开文件夹入口。
+
+### 实现
+
+- 后端 `internal/jenkins/console.go`：
+  - `consoleExportName(fullName, number)`：任务全名的 `/` 换成 `-`，空名回落 `build-<n>.log`；
+  - `StartConsoleSave`：复用后台任务表（与制品下载同一套 `artifactStatus` / `artifactCancel`），10 分钟 context；
+  - `saveConsoleWithProgress`：GET `<job>/<n>/consoleText` → 流式写入下载目录，进度按 `Content-Length` 上报，404 走 `not_found`。
+- 后端 `downloads.go`：抽出 `writeStreamToDownloads`（`.part` + `artifactProgressReader` + `copyWithCancel` + rename），`copyCachedToDownloads` 改为复用它。
+- 后端 `rpc/service.go`：新增 `jenkins/consoleSave`。
+- 前端 `ConsoleView.vue`：改调 `consoleSave`，500 ms 轮询进度 → 按钮 `保存中 42%`；完成 emit `notify` 弹「已保存 …」并显示路径 + 「打开文件夹」；失败显示原因并弹 info 提示；老 sidecar 无该接口时退回 `saveText`。
+- 前端 `BuildView.vue` 转发 `ConsoleView` 的 `notify` 到 App 的 toast。
+
+### 测试
+
+- 红：`TestConsoleExportNameFlattensPath`、`TestStartConsoleSaveStreamsFullLog`、`TestStartConsoleSaveMapsMissingBuild` 全失败（`console save is not implemented yet`）；`TestConsoleSaveRPCStreamsLogToDownloads` 失败（`method not found: jenkins/consoleSave`）。
+- 绿：`go test ./...` → `internal/jenkins ok`、`internal/rpc ok`（229 顶层用例，+4）；`pnpm test` → `Test Files 27 passed`、`Tests 403 passed`；`pnpm typecheck` / `go vet` exit 0。
+- `pnpm build` → `[check-version] ok: 0.16.0`，`ui/index.html 299.47 kB`。
+
+### 打包（0.16.0）
+
+- `dist/io.github.nixing178.jenkins-0.16.0-windows-x64.dbxp`，6,555,015 B，
+  sha256 `4a815ed188c39e21a461b69408ca015196fcb1ba52ff5a103a3bc84f461e83dd`。
+- 包内 `ui/index.html` 302,926 B 与本地同哈希 `c9da5fff…c4b93`；
+  sidecar 11,448,320 B，identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.16.0`。
+
+### 遗留
+
+- 真机验收未做：装 0.16.0 + 重启 DBX 后，打开一个日志很大的构建点「下载」，按钮应显示百分比、完成后弹「已保存 …」并能在 Downloads 里看到 `任务名-构建号.log`，且行数/字节数与 Jenkins 一致（不再被 2 MB 截断）。
+- 导出期间离开构建页会停止轮询（任务在后端仍会完成，只是没有提示）。
+
+## 0.16.1 移除 Pipeline 归档工具
+
+### 背景
+
+用户看到 Pipeline 任务编辑页里那块「归档产物」：脚本里已经有 `archiveArtifacts`（绿色提示），工具区却还是空白输入框，问是否该删。给出三个选项（折叠 / 只删提示 / 整块删除）后，用户选择 **3. 整块删除**。
+
+### 变更
+
+- `src/components/JobEditor.vue`：删掉 Pipeline 分支的归档工具区（文件模式 / 排除 / 三个勾选 / 语句预览 / 复制按钮 / 已存在提示 / 粘贴位置提示）及配套 computed、`copyArchiveSnippet`、3 段 CSS；提交时不再需要「Pipeline 不写 archive」的特判。
+- 删除 `src/lib/archiveSnippet.ts` 与其 9 条用例。
+- 删除 5 个中英 i18n key（`archivePipelineHint`、`archiveSnippetCopy`、`archiveSnippetExisting`、`archiveSnippetDeclarative`、`archiveSnippetScripted`）。
+- 保留：自由风格任务的「归档产物」配置（0.13.0）、后端对 `flow-definition` 的 patch 拒绝。
+
+### 测试
+
+- `pnpm typecheck` exit 0。
+- `pnpm test` → `Test Files 26 passed`、`Tests 394 passed`（403 − 9，删除随功能下线的用例，无其它回归）。
+- 后端未改动（229 用例仍全绿）。
+- `pnpm build` → `[check-version] ok: 0.16.1`，`ui/index.html 295.55 kB`。
+
+### 打包（0.16.1）
+
+- `dist/io.github.nixing178.jenkins-0.16.1-windows-x64.dbxp`，6,554,025 B，
+  sha256 `10149089e94cc544be4e6d5956a6abc597637ed0377e5141a891ce5a6488c27f`。
+- 包内 `ui/index.html` 与本地同哈希 `415e2cd6…3c271a`；
+  sidecar identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.16.1`。
+
+### 遗留
+
+- 真机验收：装 0.16.1 + 重启 DBX 后打开 Pipeline 任务编辑，应只看到「启用」与「Pipeline 脚本」，不再出现归档工具区；自由风格任务的归档配置不受影响。

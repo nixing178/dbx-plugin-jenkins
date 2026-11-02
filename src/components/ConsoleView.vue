@@ -5,6 +5,9 @@ import { locale, t } from "../i18n";
 import { copyText } from "../lib/clipboard";
 import { countMatches, highlightSegments, tailLines, trimLogTail } from "../lib/console";
 import { errorText } from "../lib/errors";
+import { formatBytes, shortenPath } from "../lib/format";
+import { isTaskFinished, taskPercent } from "../lib/taskProgress";
+import type { ToastTone } from "../lib/toast";
 import {
   countLevels,
   filterLines,
@@ -18,6 +21,11 @@ import {
 const props = defineProps<{
   job: string;
   number: number;
+}>();
+
+const emit = defineEmits<{
+  /** 导出完成/失败的消息提示，由 BuildView 转发给 App 的 toast。 */
+  notify: [text: string, tone?: ToastTone];
 }>();
 
 const MAX_LINES = 5000;
@@ -40,6 +48,13 @@ const wrap = ref(true);
 const fullscreen = ref(false);
 const copied = ref(false);
 const copiedLine = ref(0);
+/** 日志导出走 sidecar 落盘：DBX 沙箱没有 allow-downloads，浏览器下载会被静默拦截。 */
+const exporting = ref(false);
+/** 导出进度（0-100），总量未知时保持 0。 */
+const exportPercent = ref(0);
+const exportedPath = ref("");
+const exportError = ref("");
+let exportTimer: number | undefined;
 const activeMatch = ref(0);
 const logEl = ref<HTMLElement | null>(null);
 
@@ -226,17 +241,89 @@ async function copyLine(row: LogRow): Promise<void> {
   }, 1500);
 }
 
-function downloadLog(): void {
+function stopExportPoll(): void {
+  if (exportTimer !== undefined) {
+    window.clearTimeout(exportTimer);
+    exportTimer = undefined;
+  }
+}
+
+/** 轮询导出任务：全量日志可能有几十 MB，按百分比显示进度。 */
+function pollExport(taskId: string): Promise<void> {
+  return new Promise((resolve) => {
+    const tick = async (): Promise<void> => {
+      try {
+        const snapshot = await jenkinsApi.artifactStatus(taskId);
+        exportPercent.value = taskPercent(snapshot.done, snapshot.total);
+
+        if (!isTaskFinished(snapshot.state)) {
+          exportTimer = window.setTimeout(() => void tick(), 500);
+          return;
+        }
+        if (snapshot.state === "saved") {
+          const saved = snapshot.path ?? "";
+          exportedPath.value = saved;
+          emit("notify", t("downloadDoneToast", {
+            name: snapshot.fileName || `${props.number}.log`,
+            size: formatBytes(snapshot.total),
+          }));
+          window.setTimeout(() => {
+            if (exportedPath.value === saved) exportedPath.value = "";
+          }, 6000);
+        } else if (snapshot.state === "failed") {
+          exportError.value = errorText(snapshot.error || t("artifactFailed"), locale.value);
+          emit("notify", t("downloadFailedToast", { message: exportError.value }), "info");
+        }
+        resolve();
+      } catch (error) {
+        exportError.value = describeError(error);
+        emit("notify", t("downloadFailedToast", { message: exportError.value }), "info");
+        resolve();
+      }
+    };
+    void tick();
+  });
+}
+
+async function downloadLog(): Promise<void> {
+  if (exporting.value) return;
+  exporting.value = true;
+  exportPercent.value = 0;
+  exportedPath.value = "";
+  exportError.value = "";
+  stopExportPoll();
+
   try {
-    const blob = new Blob([text.value], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${props.job.replaceAll("/", "-")}-${props.number}.log`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    // 导出完整日志：后端直接拉 Jenkins 的 consoleText 落盘，不受前端 2MB 缓冲限制。
+    const task = await jenkinsApi.consoleSave(props.job, props.number);
+    await pollExport(task.taskId);
+  } catch (error) {
+    // 老 sidecar 没有 consoleSave 时退回内存文本导出，至少能拿到当前已加载的内容。
+    try {
+      const saved = await jenkinsApi.saveText(
+        `${props.job.replaceAll("/", "-")}-${props.number}.log`,
+        text.value,
+      );
+      exportedPath.value = saved.path;
+      emit("notify", t("downloadDoneToast", {
+        name: saved.fileName,
+        size: formatBytes(saved.size),
+      }));
+    } catch {
+      exportError.value = describeError(error);
+      emit("notify", t("downloadFailedToast", { message: exportError.value }), "info");
+    }
+  } finally {
+    exporting.value = false;
+  }
+}
+
+async function openExportedLog(): Promise<void> {
+  if (!exportedPath.value) return;
+  try {
+    await jenkinsApi.revealFile(exportedPath.value);
   } catch {
-    void copyLog();
+    // 文件可能已被移走：保留路径提示即可。
   }
 }
 
@@ -274,6 +361,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", handleVisibility);
   document.removeEventListener("keydown", handleKeydown);
+  stopExportPoll();
   generation += 1;
   if (timer) window.clearTimeout(timer);
 });
@@ -339,9 +427,34 @@ onBeforeUnmount(() => {
         <button type="button" class="ghost" @click="copyLog">
           {{ copied ? t("copied") : t("copy") }}
         </button>
-        <button type="button" class="ghost" :title="t('downloadBuffer')" @click="downloadLog">
-          {{ t("download") }}
+        <button
+          type="button"
+          class="ghost"
+          :title="exportedPath || t('downloadBuffer')"
+          :disabled="exporting"
+          @click="downloadLog"
+        >
+          {{
+            exporting
+              ? t("artifactSavingProgress", { percent: exportPercent })
+              : t("download")
+          }}
         </button>
+        <button
+          v-if="exportedPath"
+          type="button"
+          class="ghost"
+          :title="exportedPath"
+          @click="openExportedLog"
+        >
+          {{ t("artifactOpenFolder") }}
+        </button>
+        <span v-if="exportedPath" class="export-note" :title="exportedPath">
+          {{ shortenPath(exportedPath) }}
+        </span>
+        <span v-else-if="exportError" class="export-note export-failed" :title="exportError">
+          {{ exportError }}
+        </span>
         <button type="button" class="ghost" @click="fullscreen = !fullscreen">
           {{ fullscreen ? t("exitFullscreen") : t("enterFullscreen") }}
         </button>
@@ -541,6 +654,20 @@ onBeforeUnmount(() => {
 .ghost:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.export-note {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.export-failed {
+  color: var(--danger);
 }
 
 .banner {

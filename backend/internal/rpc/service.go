@@ -57,6 +57,17 @@ type LifecycleRequest struct {
 	ID     int            `json:"id"`
 	Params map[string]any `json:"params"`
 
+	// 制品下载：Path 是 Jenkins 的 relativePath，offset/length 是分块窗口。
+	Path   string `json:"path"`
+	Offset int64  `json:"offset"`
+	Length int    `json:"length"`
+
+	// 文本落盘（控制台日志导出）：Content 是要写入文件的内容。
+	Content string `json:"content"`
+
+	// TaskID 是异步下载任务的标识。
+	TaskID string `json:"taskId"`
+
 	// 批量构建：skipBusy 缺省为 true（*bool 才能区分「没传」与「显式 false」）。
 	SkipBusy       *bool `json:"skipBusy"`
 	MaxConcurrency int   `json:"maxConcurrency"`
@@ -263,6 +274,107 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, mapError(err)
 		}
 		return chunk, nil
+
+	case "jenkins/artifactInfo":
+		if rpcErr := validateArtifactRequest(request); rpcErr != nil {
+			return nil, rpcErr
+		}
+		info, err := client.GetArtifactInfo(ctx, request.Job, request.Number, request.Path)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return info, nil
+
+	case "jenkins/artifactChunk":
+		if rpcErr := validateArtifactRequest(request); rpcErr != nil {
+			return nil, rpcErr
+		}
+		chunk, err := client.GetArtifactChunk(
+			ctx,
+			request.Job,
+			request.Number,
+			request.Path,
+			request.Offset,
+			request.Length,
+		)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return chunk, nil
+
+	case "jenkins/artifactSave":
+		if rpcErr := validateArtifactRequest(request); rpcErr != nil {
+			return nil, rpcErr
+		}
+		saved, err := client.SaveArtifact(ctx, request.Job, request.Number, request.Path)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return saved, nil
+
+	case "jenkins/saveText":
+		if strings.TrimSpace(request.Name) == "" {
+			return nil, invalidParams("missing file name")
+		}
+		saved, err := client.SaveText(request.Name, []byte(request.Content))
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return saved, nil
+
+	case "jenkins/consoleSave":
+		if strings.TrimSpace(request.Job) == "" {
+			return nil, invalidParams("missing job name")
+		}
+		if request.Number <= 0 {
+			return nil, invalidParams("build number must be positive")
+		}
+		snapshot, err := client.StartConsoleSave(request.Job, request.Number)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return snapshot, nil
+
+	case "jenkins/artifactStart":
+		if rpcErr := validateArtifactRequest(request); rpcErr != nil {
+			return nil, rpcErr
+		}
+		snapshot, err := client.StartArtifactSave(request.Job, request.Number, request.Path)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return snapshot, nil
+
+	case "jenkins/artifactStatus":
+		if strings.TrimSpace(request.TaskID) == "" {
+			return nil, invalidParams("missing task id")
+		}
+		snapshot, err := client.ArtifactTaskStatus(request.TaskID)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return snapshot, nil
+
+	case "jenkins/artifactCancel":
+		if strings.TrimSpace(request.TaskID) == "" {
+			return nil, invalidParams("missing task id")
+		}
+		if err := client.CancelArtifactTask(request.TaskID); err != nil {
+			return nil, mapError(err)
+		}
+		return map[string]any{"success": true}, nil
+
+	case "jenkins/revealFile":
+		if strings.TrimSpace(request.Path) == "" {
+			return nil, invalidParams("missing file path")
+		}
+		if err := jenkins.RevealFile(request.Path); err != nil {
+			return nil, mapError(err)
+		}
+		return map[string]any{"success": true}, nil
+
+	case "jenkins/downloadDir":
+		return map[string]any{"dir": client.DownloadDir()}, nil
 
 	case "jenkins/trigger":
 		if strings.TrimSpace(request.Job) == "" {
@@ -555,6 +667,13 @@ func buildClient(request LifecycleRequest) (*jenkins.Client, *Error) {
 		timeoutSeconds = 300
 	}
 
+	downloadDir, dirErr := jenkins.ResolveDownloadDir(
+		configString(request.Connection.ExternalConfig, "download_dir", ""),
+	)
+	if dirErr != nil {
+		return nil, mapError(dirErr)
+	}
+
 	client, err := jenkins.NewClient(jenkins.Config{
 		BaseURL:            baseURL,
 		Username:           strings.TrimSpace(request.Connection.Username),
@@ -562,6 +681,7 @@ func buildClient(request LifecycleRequest) (*jenkins.Client, *Error) {
 		ReadOnly:           configBool(request.Connection.ExternalConfig, "read_only", request.Connection.ReadOnly),
 		InsecureSkipVerify: configBool(request.Connection.ExternalConfig, "insecure_skip_verify", false),
 		Timeout:            timeSeconds(timeoutSeconds),
+		DownloadDir:        downloadDir,
 	})
 	if err != nil {
 		return nil, mapError(err)
@@ -702,7 +822,32 @@ func jobUpdate(fields map[string]any) jenkins.JobUpdate {
 		update.SetScript = true
 		update.Script = stringValue(value)
 	}
+	if value, ok := fields["archive"]; ok {
+		update.SetArchive = true
+		update.Archive = archiveFromValue(value)
+	}
 	return update
+}
+
+// archiveFromValue 把前端提交的归档配置转成 jenkins.ArtifactArchive；
+// defaultExcludes 未传时保持 Jenkins 默认的 true，避免把已有配置改成 false。
+func archiveFromValue(value any) jenkins.ArtifactArchive {
+	archive := jenkins.ArtifactArchive{DefaultExcludes: true}
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return archive
+	}
+	archive.Enabled = boolValue(raw["enabled"])
+	archive.Files = stringValue(raw["files"])
+	archive.Excludes = stringValue(raw["excludes"])
+	archive.Fingerprint = boolValue(raw["fingerprint"])
+	archive.OnlyIfSuccessful = boolValue(raw["onlyIfSuccessful"])
+	archive.AllowEmptyArchive = boolValue(raw["allowEmptyArchive"])
+	if _, present := raw["defaultExcludes"]; present {
+		archive.DefaultExcludes = boolValue(raw["defaultExcludes"])
+	}
+	archive.CaseSensitive = boolValue(raw["caseSensitive"])
+	return archive
 }
 
 // viewUpdate 把前端提交的部分字段转成 jenkins.ViewUpdate。
@@ -776,6 +921,20 @@ func mapError(err error) *Error {
 
 func invalidParams(message string) *Error {
 	return &Error{Code: -32602, Kind: "invalid_params", Message: "invalid_params: " + message}
+}
+
+// validateArtifactRequest 校验制品下载的前置参数；路径安全由 jenkins.ArtifactPath 二次把关。
+func validateArtifactRequest(request LifecycleRequest) *Error {
+	if strings.TrimSpace(request.Job) == "" {
+		return invalidParams("missing job name")
+	}
+	if request.Number <= 0 {
+		return invalidParams("build number must be positive")
+	}
+	if strings.TrimSpace(request.Path) == "" {
+		return invalidParams("missing artifact path")
+	}
+	return nil
 }
 
 func invalidConfig(message string) *Error {

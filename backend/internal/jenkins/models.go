@@ -149,6 +149,22 @@ type Artifact struct {
 	RelativePath string `json:"relativePath"`
 }
 
+// ArtifactInfo 是制品元信息（HEAD 制品 URL 得到）。
+type ArtifactInfo struct {
+	FileName    string `json:"fileName"`
+	Size        int64  `json:"size"`
+	ContentType string `json:"contentType,omitempty"`
+}
+
+// ArtifactChunk 是制品的一段内容，DataBase64 为原始字节的 base64。
+type ArtifactChunk struct {
+	Offset     int64  `json:"offset"`
+	Length     int    `json:"length"`
+	Total      int64  `json:"total"`
+	EOF        bool   `json:"eof"`
+	DataBase64 string `json:"dataBase64"`
+}
+
 // BuildDetail 是单次构建详情。
 type BuildDetail struct {
 	Number            int             `json:"number"`
