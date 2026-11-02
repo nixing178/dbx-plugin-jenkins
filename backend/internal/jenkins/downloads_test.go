@@ -137,7 +137,7 @@ func TestSaveArtifactUsesConfiguredDir(t *testing.T) {
 	client, err := NewClient(Config{
 		BaseURL:     server.URL,
 		Username:    "alice",
-		APIToken:    "token-123",
+		Secret:      "token-123",
 		ReadOnly:    true,
 		Timeout:     2 * time.Second,
 		DownloadDir: custom,

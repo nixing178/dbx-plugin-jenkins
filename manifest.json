@@ -3,7 +3,7 @@
   "manifest_version": 1,
   "id": "io.github.nixing178.jenkins",
   "name": "Jenkins Console",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "publisher": "nixing178",
   "description": "Manage Jenkins jobs, builds, console output, queue and nodes inside DBX.",
   "source": "https://github.com/nixing178/dbx-plugin-jenkins",
@@ -33,7 +33,7 @@
       "label": "Jenkins",
       "icon": "assets/connection.svg",
       "database_type": "jenkins",
-      "description": "Connect to a Jenkins controller with an API token.",
+      "description": "Connect to a Jenkins controller with an API token or username and password.",
       "fields": [
         {
           "key": "display_name",
@@ -86,11 +86,32 @@
           "placeholder": "Leave empty for anonymous read-only access"
         },
         {
+          "key": "auth_method",
+          "label": "Authentication",
+          "type": "select",
+          "binding": "config",
+          "default": "token",
+          "options": [
+            { "label": "API token", "value": "token" },
+            { "label": "Username and password", "value": "password" }
+          ]
+        },
+        {
           "key": "api_token",
           "label": "API token",
           "type": "password",
           "binding": "secret",
-          "placeholder": "User profile → API Token"
+          "placeholder": "User profile → API Token",
+          "visible_when": { "not": { "field": "auth_method", "one_of": ["password"] } }
+        },
+        {
+          "key": "password",
+          "label": "Password",
+          "type": "password",
+          "binding": "password",
+          "placeholder": "Jenkins login password (not an API token)",
+          "visible_when": { "field": "auth_method", "one_of": ["password"] },
+          "required_when": { "field": "auth_method", "one_of": ["password"] }
         },
         {
           "key": "read_only",
@@ -147,7 +168,7 @@
       "contributions": {
         "io.github.nixing178.jenkins.connection": {
           "label": "Jenkins",
-          "description": "Connect to a Jenkins controller with an API token.",
+          "description": "Connect to a Jenkins controller with an API token or username and password.",
           "fields": {
             "display_name": { "label": "Connection name" },
             "scheme": {
@@ -161,7 +182,15 @@
               "label": "Username",
               "placeholder": "Leave empty for anonymous read-only access"
             },
+            "auth_method": {
+              "label": "Authentication",
+              "options": { "token": "API token", "password": "Username and password" }
+            },
             "api_token": { "label": "API token", "placeholder": "User profile → API Token" },
+            "password": {
+              "label": "Password",
+              "placeholder": "Jenkins login password (not an API token)"
+            },
             "read_only": { "label": "Read-only mode" },
             "download_dir": {
               "label": "Download directory",
@@ -183,7 +212,7 @@
       "contributions": {
         "io.github.nixing178.jenkins.connection": {
           "label": "Jenkins 连接",
-          "description": "使用 API Token 连接 Jenkins 控制器。",
+          "description": "使用 API Token 或用户名密码连接 Jenkins 控制器。",
           "fields": {
             "display_name": { "label": "连接名称" },
             "scheme": {
@@ -194,7 +223,15 @@
             "port": { "label": "端口" },
             "base_path": { "label": "上下文路径", "placeholder": "/jenkins" },
             "username": { "label": "用户名", "placeholder": "留空表示匿名只读访问" },
+            "auth_method": {
+              "label": "认证方式",
+              "options": { "token": "API Token", "password": "用户名密码" }
+            },
             "api_token": { "label": "API Token", "placeholder": "用户设置 → API Token" },
+            "password": {
+              "label": "密码",
+              "placeholder": "Jenkins 登录密码（不是 API Token）"
+            },
             "read_only": { "label": "只读模式" },
             "download_dir": {
               "label": "下载目录",

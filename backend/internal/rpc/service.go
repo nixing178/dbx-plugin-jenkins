@@ -122,7 +122,7 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 
 		who, err := client.TestConnection(ctx)
 		if err != nil {
-			return nil, mapError(err)
+			return nil, withAuthHint(mapError(err), request)
 		}
 		return connectionResult(client, who), nil
 
@@ -137,7 +137,7 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 		who, err := client.TestConnection(ctx)
 		if err != nil {
 			client.CloseIdleConnections()
-			return nil, mapError(err)
+			return nil, withAuthHint(mapError(err), request)
 		}
 
 		s.mu.Lock()
@@ -674,10 +674,15 @@ func buildClient(request LifecycleRequest) (*jenkins.Client, *Error) {
 		return nil, mapError(dirErr)
 	}
 
+	secret, secretErr := connectionSecret(request)
+	if secretErr != nil {
+		return nil, secretErr
+	}
+
 	client, err := jenkins.NewClient(jenkins.Config{
 		BaseURL:            baseURL,
 		Username:           strings.TrimSpace(request.Connection.Username),
-		APIToken:           connectionToken(request),
+		Secret:             secret,
 		ReadOnly:           configBool(request.Connection.ExternalConfig, "read_only", request.Connection.ReadOnly),
 		InsecureSkipVerify: configBool(request.Connection.ExternalConfig, "insecure_skip_verify", false),
 		Timeout:            timeSeconds(timeoutSeconds),
@@ -689,6 +694,37 @@ func buildClient(request LifecycleRequest) (*jenkins.Client, *Error) {
 	return client, nil
 }
 
+const (
+	authMethodToken    = "token"
+	authMethodPassword = "password"
+
+	// passwordAuthHint 只在密码模式 401 时追加，避免用户对着裸 401 猜原因。
+	passwordAuthHint = "check that this Jenkins allows password login; " +
+		"instances with two-factor authentication or a token-only policy require an API token"
+)
+
+// resolveAuthMethod 读取连接的认证方式；老连接没有该字段时按 API Token 处理。
+func resolveAuthMethod(request LifecycleRequest) string {
+	return strings.ToLower(configString(request.Connection.ExternalConfig, "auth_method", authMethodToken))
+}
+
+// connectionSecret 按认证方式取出 Basic Auth 的密码或 API Token。
+// 密码模式只认密码字段：显式选了密码后，残留的 Token 不能抢占。
+func connectionSecret(request LifecycleRequest) (string, *Error) {
+	switch method := resolveAuthMethod(request); method {
+	case authMethodToken:
+		return connectionToken(request), nil
+	case authMethodPassword:
+		if password := connectionPassword(request); password != "" {
+			return password, nil
+		}
+		return "", invalidConfig("password is required when auth_method is password")
+	default:
+		return "", invalidConfig(`unsupported auth_method "` + method + `"; use "token" or "password"`)
+	}
+}
+
+// connectionToken 保留 token 模式的全部旧行为（含历史 password 兜底）。
 func connectionToken(request LifecycleRequest) string {
 	if token := stringValue(request.Connection.APIToken); token != "" {
 		return token
@@ -705,6 +741,37 @@ func connectionToken(request LifecycleRequest) string {
 		}
 	}
 	return stringValue(request.Connection.Password)
+}
+
+// connectionPassword 只从密码字段取值，不回落到 api_token。
+func connectionPassword(request LifecycleRequest) string {
+	if password := stringValue(request.Connection.Password); password != "" {
+		return password
+	}
+	for _, secrets := range []map[string]any{
+		request.Connection.Secrets,
+		request.Connection.ConnectionSecrets,
+		request.Secrets,
+	} {
+		if password := stringValue(secrets["password"]); password != "" {
+			return password
+		}
+	}
+	return ""
+}
+
+// withAuthHint 给密码模式的 401 补一句可操作提示；token 模式保持原样。
+func withAuthHint(rpcErr *Error, request LifecycleRequest) *Error {
+	if rpcErr == nil ||
+		rpcErr.Kind != string(jenkins.ErrUnauthorized) ||
+		resolveAuthMethod(request) != authMethodPassword {
+		return rpcErr
+	}
+	return &Error{
+		Code:    rpcErr.Code,
+		Kind:    rpcErr.Kind,
+		Message: rpcErr.Message + "; " + passwordAuthHint,
+	}
 }
 
 func connectionResult(client *jenkins.Client, who *jenkins.WhoAmI) map[string]any {

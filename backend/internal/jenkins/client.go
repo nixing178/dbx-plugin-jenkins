@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	userAgent   = "dbx-jenkins-plugin/0.11.1"
+	userAgent   = "dbx-jenkins-plugin/0.11.2"
 	maxJSONBody = 8 << 20
 )
 
@@ -36,7 +36,7 @@ type crumbState struct {
 type Client struct {
 	baseURL    string
 	username   string
-	apiToken   string
+	secret     string
 	readOnly   bool
 	httpClient *http.Client
 	writeClient *http.Client
@@ -62,7 +62,8 @@ type Client struct {
 type Config struct {
 	BaseURL            string
 	Username           string
-	APIToken           string
+	// Secret 是 Basic Auth 的密码或 API Token，由 RPC 层按认证方式解析。
+	Secret             string
 	ReadOnly           bool
 	InsecureSkipVerify bool
 	Timeout            time.Duration
@@ -139,7 +140,7 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{
 		baseURL:        strings.TrimRight(parsed.String(), "/"),
 		username:       cfg.Username,
-		apiToken:       cfg.APIToken,
+		secret:         cfg.Secret,
 		readOnly:       cfg.ReadOnly,
 		httpClient:     httpClient,
 		writeClient:    writeClient,
@@ -346,7 +347,7 @@ func (c *Client) doWith(request *http.Request, client *http.Client) (*http.Respo
 		request.Header.Set("Accept", "application/json")
 	}
 	if c.username != "" {
-		request.SetBasicAuth(c.username, c.apiToken)
+		request.SetBasicAuth(c.username, c.secret)
 	}
 
 	response, err := client.Do(request)
