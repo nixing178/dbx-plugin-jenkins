@@ -3,7 +3,7 @@
 在 DBX 内管理 Jenkins 任务、构建、控制台日志、队列与节点。
 
 - 插件 ID：`io.github.nixing178.jenkins`
-- 当前版本：`0.11.1`（Active Choices 参数单选 / 多选；构建制品下载、归档产物配置、控制台日志全量导出）
+- 当前版本：`0.11.2`（连接支持 API Token 与用户名密码；Active Choices 参数单选 / 多选；构建制品下载、归档产物配置、控制台日志全量导出）
 - 形态：Go Sidecar + Vue3 静态工作台
 - 许可证：Apache-2.0
 
@@ -292,7 +292,7 @@ Fork 协作时，保留上游插件 ID、publisher 和项目链接，将代码�
 
 1. DBX → 插件中心 → 设置 → 打开「允许安装未签名开发包」。
 2. 插件中心 → 安装 → 从文件 → 选择与当前系统和架构匹配的 `io.github.nixing178.jenkins-<version>-<target>.dbxp`（target 见上表）。
-3. 新建连接，类型选 **Jenkins**，填写地址、端口、用户名与 API Token。
+3. 新建连接，类型选 **Jenkins**，填写地址、端口、用户名，再选择认证方式：**API Token**（推荐）或**用户名密码**。
 4. 从 `com.anjun.jenkins` 旧版升级时：两者是不同插件，需先在插件中心卸载旧版，再安装新版。
 
 > 若启动时报 `Plugin 'io.github.nixing178.jenkins' initialization failed: backend identity 'x' does not match manifest 'y'`，
@@ -307,7 +307,9 @@ Fork 协作时，保留上游插件 ID、publisher 和项目链接，将代码�
 | 协议 | HTTPS（默认）/ HTTP（内网） |
 | IP / 域名 + 端口 | Jenkins 控制器地址，默认 `8080` |
 | 上下文路径 | 部署在子路径时填写，如 `/jenkins` |
+| 认证方式 | API Token（默认）/ 用户名密码；密码模式由宿主凭据存储，插件不写入连接配置 |
 | 用户名 + API Token | 在 Jenkins「用户设置 → API Token」生成；留空表示匿名只读 |
+| 用户名 + 密码 | 仅在密码模式使用。Jenkins 启用双因素、强制 Token 或 SSO（OIDC/SAML）时密码登录会 401，请改用 API Token |
 | 只读模式 | 默认开启，后端会拒绝触发/停止/取消队列 |
 | 跳过 TLS 证书校验 | 仅用于自签证书的内网实例 |
 
@@ -362,8 +364,9 @@ Fork 协作时，保留上游插件 ID、publisher 和项目链接，将代码�
 | M18 控制台日志导出 | 已完成（0.11.0：`consoleSave` 全量落盘 + 进度百分比 + 完成通知 + 打开文件夹；229 后端 \+ 403 前端用例全绿） |
 | M18b 移除 Pipeline 归档工具 | 已完成（0.11.0：按用户选择整块删除，Pipeline 归档手写脚本；394 前端用例全绿） |
 | M19 Active Choices 参数 | 已完成（0.11.1：`org.biouno.unochoice.*` 参数从任务 config.xml 的脚本里提取静态选项；`PT_CHECKBOX` 渲染为复选框组、值按逗号拼接，其余渲染为下拉框；动态脚本与取不到选项时仍回退文本框；231 后端 + 403 前端用例全绿） |
+| M20 用户名密码登录 | 已完成（0.11.2：连接新增「认证方式」下拉，密码模式走 Basic Auth，密码由宿主凭据存储；缺密码时后端在发请求前拒绝，密码模式 401 追加改用 API Token 的提示；239 后端 + 403 前端用例全绿） |
 
-> 0.11.1 为当前对外版本号；M14–M18b 的内部迭代号（0.11.0–0.16.1）不再对外使用，逐版本验收记录见 [`docs/test-evidence.md`](./docs/test-evidence.md)。
+> 0.11.2 为当前对外版本号；M14–M18b 的内部迭代号（0.11.0–0.16.1）不再对外使用，逐版本验收记录见 [`docs/test-evidence.md`](./docs/test-evidence.md)。
 
 > 任务列表已按 Jenkins 原生 Views 分组：顶部 Tab 切换视图，视图内分「文件夹 / 任务」两组。
 > Tab 溢出时左右箭头滚动，当前视图自动居中；打开视图自动选中首个任务；左栏宽 320px。

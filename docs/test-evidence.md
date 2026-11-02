@@ -485,12 +485,12 @@ ok  github.com/nixing178/dbx-plugin-jenkins/internal/rpc
 
 ```
 PASS 重名（Jenkins 返回 400，需透出原因）
-     -> rejected: A job already exists with the name ‘probe-2’
+     -> rejected: A job already exists with the name 'probe-2'
 PASS 名字含 *（本地拦截）        -> invalid_config: name must not contain "*"
 PASS 名字含 "（本地拦截，避免 500） -> invalid_config: name must not contain "\""
 PASS 中文名                     -> {"fullName":"中文任务-crud","success":true}
 PASS 文件夹内新建                -> {"fullName":"probe-folder2/child-b","success":true}
-PASS 文件夹内重名                -> rejected: A job already exists with the name ‘child-b’
+PASS 文件夹内重名                -> rejected: A job already exists with the name 'child-b'
 ```
 
 覆盖：
@@ -1818,3 +1818,32 @@ public final class WorkflowJob extends Job   // hudson.model.Job，不是 Abstra
 ### 遗留
 
 - 真机验收未做：需在安装 `uno-choice 2.8.9` 的 Jenkins 上打开带 `PT_CHECKBOX` 参数的任务，确认复选框可多选、触发构建后参数值为逗号拼接；动态脚本任务应仍显示文本框。
+
+## 0.11.2 用户名密码登录（Issue #4）
+
+### 方案
+
+见 `docs/plan-basic-auth.md`（D1:1 / D2:2 / D3:1 / D4:3）。诉求是「不想自己签发 API Token」。
+
+- 连接表单新增 `auth_method`（API Token / 用户名密码，默认 Token）与 `password`（`binding: password`，仅密码模式显示且必填）。
+- 后端按模式取凭据：密码模式只认 `connection.password` / `secrets.password`，残留 `api_token` 不抢占；缺密码在发请求前返回 `invalid_config`；非法 `auth_method` 同样拒绝。
+- 密码模式 401 追加提示「该实例可能启用 2FA / 强制 Token，请改用 API Token」；Token 模式错误文案不变。
+- `jenkins.Config.APIToken` 改名 `Secret`，语义覆盖 Token 与密码。
+
+### 测试（本地）
+
+- 红：8 条新用例（7 认证 + 1 manifest 契约）先失败 5 条，守卫 3 条通过。
+- 绿：`go vet ./...` 无输出；`go test ./... -v` → 239 PASS / 0 FAIL（新增 8）；`pnpm test` → `Test Files 27 passed`、`Tests 403 passed`；`pnpm typecheck` exit 0；`node scripts/check-version.mjs` → `ok: 0.11.2`。
+
+### 打包（0.11.2）
+
+- `dist/io.github.nixing178.jenkins-0.11.2-windows-x64.dbxp`，6,566,177 B，
+  sha256 `d7731dd89e79f892288cfebe7eab41d347840bdee9c189e24bf99975fe656ad3`。
+- 包内 7 条目；`ui/index.html` 299,905 B 与本地同哈希 `9294c951…0ed02b164`；
+  sidecar identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.11.2`。
+- 首次打包发现包内英文描述仍是旧的「with an API token.」：根 manifest 贡献级描述未被替换（本地化级已替换），
+  修正描述后重新打包，第二次包哈希为上值。
+
+### 遗留
+
+- 真机验收未做：需在真实 Jenkins 上验证密码登录成功、2FA 实例提示、旧连接 Token 回归，并确认宿主未把密码明文写入连接配置。

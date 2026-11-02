@@ -17,7 +17,7 @@ func newTestClient(t *testing.T, baseURL string, readOnly bool) *Client {
 	client, err := NewClient(Config{
 		BaseURL:  baseURL,
 		Username: "alice",
-		APIToken: "token-123",
+		Secret:   "token-123",
 		ReadOnly: readOnly,
 		Timeout:  2 * time.Second,
 	})
@@ -282,7 +282,7 @@ func TestGetMapsTimeout(t *testing.T) {
 	client, err := NewClient(Config{
 		BaseURL:  server.URL,
 		Username: "alice",
-		APIToken: "token",
+		Secret:   "token",
 		Timeout:  30 * time.Millisecond,
 	})
 	if err != nil {
