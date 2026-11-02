@@ -348,7 +348,8 @@ func writeDownloadFile(dir, name string, content []byte) (*SavedFile, error) {
 
 // sanitizeFileName 只保留文件名本身，并替换 Windows 不允许的字符。
 func sanitizeFileName(name string) string {
-	cleaned := strings.TrimSpace(filepath.Base(strings.TrimSpace(name)))
+	normalized := strings.ReplaceAll(strings.TrimSpace(name), "\\", "/")
+	cleaned := strings.TrimSpace(pathpkg.Base(normalized))
 	cleaned = strings.Map(func(character rune) rune {
 		switch character {
 		case '\\', '/', ':', '*', '?', '"', '<', '>', '|':
