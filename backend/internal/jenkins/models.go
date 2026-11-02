@@ -36,6 +36,8 @@ type ParameterDefinition struct {
 	Description  string   `json:"description"`
 	DefaultValue string   `json:"defaultValue"`
 	Choices      []string `json:"choices"`
+	// MultiSelect 对应 uno-choice 的 PT_CHECKBOX，值按逗号拼接。
+	MultiSelect bool `json:"multiSelect"`
 }
 
 // BatchTargetInfo 是批量预检结果：确认弹窗用的实时状态与参数定义。

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { t } from "../i18n";
+import { isMultiSelect, parseSelection, toggleSelection } from "../lib/paramValue";
 import type { ParameterDefinition } from "../types";
 
 /**
@@ -44,6 +45,15 @@ function onInput(name: string, event: Event): void {
 function onCheck(name: string, event: Event): void {
   update(name, (event.target as HTMLInputElement).checked);
 }
+
+function isSelected(parameter: ParameterDefinition, choice: string): boolean {
+  return parseSelection(textValue(parameter.name)).includes(choice);
+}
+
+function onChoice(parameter: ParameterDefinition, choice: string, event: Event): void {
+  const checked = (event.target as HTMLInputElement).checked;
+  update(parameter.name, toggleSelection(parameter.choices ?? [], textValue(parameter.name), choice, checked));
+}
 </script>
 
 <template>
@@ -60,8 +70,21 @@ function onCheck(name: string, event: Event): void {
         {{ t("paramFileUnsupported") }}
       </span>
 
+      <div v-if="isMultiSelect(parameter)" class="choice-group">
+        <label v-for="choice in parameter.choices ?? []" :key="choice" class="choice-item">
+          <input
+            type="checkbox"
+            class="checkbox"
+            :checked="isSelected(parameter, choice)"
+            :disabled="isDisabled(parameter)"
+            @change="onChoice(parameter, choice, $event)"
+          />
+          <span>{{ choice }}</span>
+        </label>
+      </div>
+
       <select
-        v-if="parameter.type === 'ChoiceParameterDefinition'"
+        v-else-if="parameter.choices?.length"
         :value="textValue(parameter.name)"
         :disabled="isDisabled(parameter)"
         @change="onInput(parameter.name, $event)"
@@ -178,5 +201,23 @@ textarea:focus {
 .checkbox {
   width: 16px;
   height: 16px;
+}
+
+.choice-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+
+.choice-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
 }
 </style>

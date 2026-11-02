@@ -3,7 +3,9 @@ package jenkins
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,7 +16,7 @@ const jobsTree = "jobs[name,fullName,color,url,_class,lastBuild[number,result,ti
 const jobTree = "name,fullName,description,url,color,buildable,inQueue," +
 	"lastBuild[number,result,timestamp,duration,building]," +
 	"lastSuccessfulBuild[number],lastFailedBuild[number]," +
-	"property[parameterDefinitions[name,type,description,defaultParameterValue[value],choices]],_class"
+	"property[parameterDefinitions[name,type,_class,description,defaultParameterValue[value],choices]],_class"
 
 // GetJobs 列出某个文件夹下的直接子任务；folder 为空表示根目录。
 func (c *Client) GetJobs(ctx context.Context, folder string) ([]JobSummary, error) {
@@ -90,6 +92,7 @@ func (c *Client) GetJob(ctx context.Context, fullName string) (*JobDetail, error
 			ParameterDefinitions []struct {
 				Name                  string   `json:"name"`
 				Type                  string   `json:"type"`
+				Class                 string   `json:"_class"`
 				Description           string   `json:"description"`
 				Choices               []string `json:"choices"`
 				DefaultParameterValue *struct {
@@ -125,6 +128,7 @@ func (c *Client) GetJob(ctx context.Context, fullName string) (*JobDetail, error
 		job.Status = StatusFromResult(job.LastBuild.Result, job.LastBuild.Building)
 	}
 
+	activeChoice := map[string]bool{}
 	for _, property := range payload.Property {
 		for _, definition := range property.ParameterDefinitions {
 			parameter := ParameterDefinition{
@@ -136,10 +140,93 @@ func (c *Client) GetJob(ctx context.Context, fullName string) (*JobDetail, error
 			if definition.DefaultParameterValue != nil {
 				parameter.DefaultValue = anyToString(definition.DefaultParameterValue.Value)
 			}
+			if len(definition.Choices) == 0 && isActiveChoiceClass(definition.Class) {
+				activeChoice[definition.Name] = true
+			}
 			job.Parameters = append(job.Parameters, parameter)
 		}
 	}
+	// Active Choices（uno-choice）参数不会在 JSON API 里返回 choices，
+	// 只能从 config.xml 的脚本里取静态字面量列表，取不到就退回文本框。
+	if len(activeChoice) > 0 {
+		if configText, err := c.GetJobConfig(ctx, job.FullName); err == nil {
+			options := activeChoiceOptions(configText, activeChoice)
+			for index := range job.Parameters {
+				if info, ok := options[job.Parameters[index].Name]; ok {
+					job.Parameters[index].Choices = info.Choices
+					job.Parameters[index].MultiSelect = info.MultiSelect
+				}
+			}
+		}
+	}
 	return job, nil
+}
+
+func isActiveChoiceClass(class string) bool {
+	return strings.HasPrefix(class, "org.biouno.unochoice.")
+}
+
+// activeChoiceInfo 是从任务配置里能还原出来的 Active Choices 参数信息。
+type activeChoiceInfo struct {
+	Choices     []string
+	MultiSelect bool
+}
+
+var (
+	activeChoiceBlock = regexp.MustCompile(`(?s)<org\.biouno\.unochoice\.[A-Za-z]+Parameter\b[^>]*>(.*?)</org\.biouno\.unochoice\.[A-Za-z]+Parameter>`)
+	activeChoiceName  = regexp.MustCompile(`(?s)<name>([^<]*)</name>`)
+	activeChoiceCode  = regexp.MustCompile(`(?s)<script>([^<]*)</script>`)
+	activeChoiceType  = regexp.MustCompile(`(?s)<choiceType>([^<]*)</choiceType>`)
+	literalReturn     = regexp.MustCompile(`(?s)^\s*return\s*\[(.*)\]\s*;?\s*$`)
+	literalString     = regexp.MustCompile(`'([^']*)'|"([^"]*)"`)
+)
+
+// activeChoiceOptions 从任务配置里提取 Active Choices 参数的静态选项。
+// 只认 `return ['a', 'b']` 这种纯字面量脚本，动态脚本一律放弃。
+func activeChoiceOptions(configXML string, targets map[string]bool) map[string]activeChoiceInfo {
+	options := map[string]activeChoiceInfo{}
+	for _, block := range activeChoiceBlock.FindAllStringSubmatch(configXML, -1) {
+		name := activeChoiceName.FindStringSubmatch(block[1])
+		if name == nil {
+			continue
+		}
+		key := strings.TrimSpace(name[1])
+		if !targets[key] {
+			continue
+		}
+		code := activeChoiceCode.FindStringSubmatch(block[1])
+		if code == nil {
+			continue
+		}
+		values := literalStrings(html.UnescapeString(code[1]))
+		if len(values) == 0 {
+			continue
+		}
+		info := activeChoiceInfo{Choices: values}
+		if choiceType := activeChoiceType.FindStringSubmatch(block[1]); choiceType != nil {
+			info.MultiSelect = strings.EqualFold(strings.TrimSpace(choiceType[1]), "PT_CHECKBOX")
+		}
+		options[key] = info
+	}
+	return options
+}
+
+func literalStrings(script string) []string {
+	match := literalReturn.FindStringSubmatch(script)
+	if match == nil {
+		return nil
+	}
+	var values []string
+	for _, item := range literalString.FindAllStringSubmatch(match[1], -1) {
+		value := item[1]
+		if value == "" {
+			value = item[2]
+		}
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func isFolderClass(class string) bool {

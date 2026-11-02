@@ -39,6 +39,8 @@ export interface ParameterDefinition {
   description: string;
   defaultValue: string;
   choices?: string[] | null;
+  /** uno-choice 的 PT_CHECKBOX 为多选，值按逗号拼接。 */
+  multiSelect?: boolean | null;
 }
 
 export interface JobDetail {

@@ -128,3 +128,110 @@ func TestGetJobNotFound(t *testing.T) {
 		t.Fatal("GetJob() error = nil, want not found")
 	}
 }
+
+func TestActiveChoiceOptionsStaticLiteral(t *testing.T) {
+	configXML := `<project>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>env</name>
+          <choices class="java.util.Arrays$ArrayList"><a class="string-array"><string>dev</string></a></choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <org.biouno.unochoice.ChoiceParameter plugin="uno-choice@2.8.9">
+          <name>projectName</name>
+          <script class="org.biouno.unochoice.model.GroovyScript">
+            <secureScript plugin="script-security@1402">
+              <script>return [&apos;t6-auth&apos;,&apos;t6-gateway&apos;,&apos;t6-base&apos;]</script>
+              <sandbox>true</sandbox>
+            </secureScript>
+          </script>
+          <choiceType>PT_CHECKBOX</choiceType>
+        </org.biouno.unochoice.ChoiceParameter>
+        <org.biouno.unochoice.ChoiceParameter>
+          <name>single</name>
+          <script class="org.biouno.unochoice.model.GroovyScript">
+            <secureScript><script>return ["only"]</script></secureScript>
+          </script>
+          <choiceType>PT_SINGLE_SELECT</choiceType>
+        </org.biouno.unochoice.ChoiceParameter>
+        <org.biouno.unochoice.ChoiceParameter>
+          <name>dynamic</name>
+          <script class="org.biouno.unochoice.model.GroovyScript">
+            <secureScript><script>return jenkins.model.Jenkins.instance.items.collect { it.name }</script></secureScript>
+          </script>
+        </org.biouno.unochoice.ChoiceParameter>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+</project>`
+
+	options := activeChoiceOptions(configXML, map[string]bool{"projectName": true, "single": true, "dynamic": true})
+	got := options["projectName"].Choices
+	want := []string{"t6-auth", "t6-gateway", "t6-base"}
+	if len(got) != len(want) {
+		t.Fatalf("projectName options = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("projectName options = %v, want %v", got, want)
+		}
+	}
+	if !options["projectName"].MultiSelect {
+		t.Errorf("PT_CHECKBOX should be multi-select")
+	}
+	if options["single"].MultiSelect {
+		t.Errorf("PT_SINGLE_SELECT must not be multi-select")
+	}
+	if _, ok := options["dynamic"]; ok {
+		t.Errorf("dynamic script should not produce literal options, got %v", options["dynamic"].Choices)
+	}
+	if _, ok := options["env"]; ok {
+		t.Errorf("standard choice parameter must not be handled here")
+	}
+}
+
+func TestGetJobFillsActiveChoiceOptions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/job/t7-api/api/json":
+			fmt.Fprint(w, `{"_class":"hudson.maven.MavenModuleSet","name":"t7-api","fullName":"t7-api","color":"blue","buildable":true,
+				"property":[{"parameterDefinitions":[
+					{"_class":"org.biouno.unochoice.ChoiceParameter","name":"projectName","type":"ChoiceParameter","description":"模块","defaultParameterValue":{"value":"t6-auth"}}
+				]}]}`)
+		case "/job/t7-api/config.xml":
+			w.Header().Set("Content-Type", "application/xml")
+			fmt.Fprint(w, `<maven2-moduleset><properties><hudson.model.ParametersDefinitionProperty><parameterDefinitions>
+				<org.biouno.unochoice.ChoiceParameter plugin="uno-choice@2.8.9">
+					<name>projectName</name>
+					<script class="org.biouno.unochoice.model.GroovyScript"><secureScript>
+						<script>return [&apos;t6-auth&apos;,&apos;t6-gateway&apos;]</script>
+					</secureScript></script>
+					<choiceType>PT_CHECKBOX</choiceType>
+				</org.biouno.unochoice.ChoiceParameter>
+			</parameterDefinitions></hudson.model.ParametersDefinitionProperty></properties></maven2-moduleset>`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, true)
+	job, err := client.GetJob(context.Background(), "t7-api")
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	if len(job.Parameters) != 1 {
+		t.Fatalf("parameters = %d, want 1", len(job.Parameters))
+	}
+	parameter := job.Parameters[0]
+	if len(parameter.Choices) != 2 || parameter.Choices[1] != "t6-gateway" {
+		t.Fatalf("choices = %v, want [t6-auth t6-gateway]", parameter.Choices)
+	}
+	if parameter.DefaultValue != "t6-auth" {
+		t.Errorf("default = %q, want t6-auth", parameter.DefaultValue)
+	}
+	if !parameter.MultiSelect {
+		t.Errorf("PT_CHECKBOX should surface multiSelect=true")
+	}
+}

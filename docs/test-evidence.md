@@ -1793,3 +1793,28 @@ public final class WorkflowJob extends Job   // hudson.model.Job，不是 Abstra
 ### 遗留
 
 - 真机验收：装 0.16.1 + 重启 DBX 后打开 Pipeline 任务编辑，应只看到「启用」与「Pipeline 脚本」，不再出现归档工具区；自由风格任务的归档配置不受影响。
+
+## 0.11.1 Active Choices 参数
+
+### 背景
+
+`org.biouno.unochoice.*` 参数在 JSON API 的 `parameterDefinitions` 里取不到 `choices`，此前参数区只能退回文本框。本次从任务 `config.xml` 的 Groovy 脚本里提取静态字面量选项：`PT_CHECKBOX` 渲染为复选框组，其余渲染为下拉框。
+
+### 变更
+
+- `backend/internal/jenkins/jobs.go`：`jobTree` 增加 `_class`；对 `choices` 为空的 uno-choice 参数额外读取 `config.xml`，只解析 `return ['a', 'b']` 形式的静态字面量，动态脚本与取不到选项时保持文本框。
+- `backend/internal/jenkins/models.go`：`ParameterDefinition` 新增 `multiSelect`。
+- `src/lib/paramValue.ts`：逗号分隔值的解析与切换，输出顺序跟 `choices` 一致，`choices` 之外的旧值保留在末尾。
+- `src/components/ParamFields.vue`：多选参数渲染复选框组；有 `choices` 的参数统一下拉框。
+- 版本号统一为 `0.11.1`（`manifest.json`、`package.json`、`backend/main.go`、User-Agent）。
+
+### 测试（本地）
+
+- `go vet ./...` 通过；`go test ./... -v` → 231 PASS / 0 FAIL（新增 2 条 Active Choices 用例）。
+- `pnpm typecheck` exit 0。
+- `pnpm test` → `Test Files 27 passed`、`Tests 403 passed`（新增 9 条 `paramValue` 用例）。
+- `pnpm build` → `[check-version] ok: 0.11.1`，`ui/index.html 296.57 kB`。
+
+### 遗留
+
+- 真机验收未做：需在安装 `uno-choice 2.8.9` 的 Jenkins 上打开带 `PT_CHECKBOX` 参数的任务，确认复选框可多选、触发构建后参数值为逗号拼接；动态脚本任务应仍显示文本框。

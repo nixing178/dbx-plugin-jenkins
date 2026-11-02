@@ -3,7 +3,7 @@
   "manifest_version": 1,
   "id": "io.github.nixing178.jenkins",
   "name": "Jenkins Console",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "publisher": "nixing178",
   "description": "Manage Jenkins jobs, builds, console output, queue and nodes inside DBX.",
   "source": "https://github.com/nixing178/dbx-plugin-jenkins",
