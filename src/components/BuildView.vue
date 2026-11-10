@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { describeError, jenkinsApi } from "../api";
 import { t } from "../i18n";
+import { buildParameterRows, parameterValueLabel } from "../lib/buildParameters";
 import {
   CHANGE_PREVIEW_LIMIT,
   changeBody,
@@ -62,6 +63,9 @@ const summaryText = computed(() =>
     files: summary.value.files,
   }),
 );
+
+/** 构建参数顺序保持 Jenkins 返回顺序，不做排序；空名称在这里兜底过滤。 */
+const parameterRows = computed(() => buildParameterRows(props.build.parameters));
 
 function toggleBody(commitId: string): void {
   const next = new Set(expandedBodies.value);
@@ -535,6 +539,19 @@ async function copyArtifactPath(artifact: Artifact): Promise<void> {
       </div>
     </div>
 
+    <section v-if="parameterRows.length" class="panel">
+      <div class="panel-head">
+        <h2>{{ t("buildParameters") }}</h2>
+        <span class="count">{{ parameterRows.length }}</span>
+      </div>
+      <dl class="params">
+        <div v-for="parameter in parameterRows" :key="parameter.name" class="param">
+          <dt :title="parameter.name">{{ parameter.name }}</dt>
+          <dd :title="parameter.value">{{ parameterValueLabel(parameter.value) }}</dd>
+        </div>
+      </dl>
+    </section>
+
     <section v-if="build.changeSet?.length" class="panel">
       <div class="panel-head">
         <h2>{{ t("changes") }}</h2>
@@ -857,6 +874,39 @@ h1 {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
+}
+
+.params {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.param {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+
+.param dt {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.param dd {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .panel-head {

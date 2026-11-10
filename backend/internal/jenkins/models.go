@@ -167,21 +167,28 @@ type ArtifactChunk struct {
 	DataBase64 string `json:"dataBase64"`
 }
 
+// BuildParameter 是本次构建实际使用的参数值（区别于任务上的参数定义）。
+type BuildParameter struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 // BuildDetail 是单次构建详情。
 type BuildDetail struct {
-	Number            int             `json:"number"`
-	Result            string          `json:"result"`
-	Building          bool            `json:"building"`
-	Timestamp         int64           `json:"timestamp"`
-	Duration          int64           `json:"duration"`
-	EstimatedDuration int64           `json:"estimatedDuration"`
-	DisplayName       string          `json:"displayName"`
-	FullDisplayName   string          `json:"fullDisplayName"`
-	URL               string          `json:"url"`
-	Causes            []Cause         `json:"causes"`
-	ChangeSet         []ChangeSetItem `json:"changeSet"`
-	Artifacts         []Artifact      `json:"artifacts"`
-	Status            Status          `json:"status"`
+	Number            int              `json:"number"`
+	Result            string           `json:"result"`
+	Building          bool             `json:"building"`
+	Timestamp         int64            `json:"timestamp"`
+	Duration          int64            `json:"duration"`
+	EstimatedDuration int64            `json:"estimatedDuration"`
+	DisplayName       string           `json:"displayName"`
+	FullDisplayName   string           `json:"fullDisplayName"`
+	URL               string           `json:"url"`
+	Causes            []Cause          `json:"causes"`
+	Parameters        []BuildParameter `json:"parameters"`
+	ChangeSet         []ChangeSetItem  `json:"changeSet"`
+	Artifacts         []Artifact       `json:"artifacts"`
+	Status            Status           `json:"status"`
 }
 
 // ConsoleChunk 是一次增量日志读取的结果。
