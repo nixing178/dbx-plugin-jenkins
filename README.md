@@ -3,7 +3,7 @@
 在 DBX 内管理 Jenkins 任务、构建、控制台日志、队列与节点。
 
 - 插件 ID：`io.github.nixing178.jenkins`
-- 当前版本：`0.11.2`（连接支持 API Token 与用户名密码；Active Choices 参数单选 / 多选；构建制品下载、归档产物配置、控制台日志全量导出）
+- 当前版本：`0.12.0`（构建详情展示本次构建参数；连接支持 API Token 与用户名密码；Active Choices 参数单选 / 多选；构建制品下载、归档产物配置、控制台日志全量导出）
 - 形态：Go Sidecar + Vue3 静态工作台
 - 许可证：Apache-2.0
 
@@ -171,6 +171,15 @@ pnpm test
 - 制品路径逐段转义，空段 / `.` / `..` / 反斜杠 / 绝对路径在 RPC 层与客户端双重拒绝。
 - 下载是 GET：只读连接照常可用，只读守卫不参与。
 
+## 构建参数
+
+构建详情页在元信息与「变更」之间显示本次构建实际使用的参数：
+
+- 数据来自构建 API 的 `actions.parameters`，与详情同一次请求取回，不额外发请求；字符串 / 布尔 / 数字统一转成文本，Active Choices 多选保持逗号拼接。
+- 参数以自适应网格排列，名称弱化、值等宽可换行；空值显示 `—`；同名参数合并（位置按首次出现，值以最后一次为准）。
+- 无参构建（或脚本触发没有参数记录）不渲染该面板；只读连接照常显示。
+- 预览页：`pnpm dev` 打开 [`/parameters-preview.html`](./parameters-preview.html)（`?theme=dark` 切深色）。
+
 ## 页面前进 / 后退
 
 鼠标侧键（后退 / 前进）可以逐屏回退与复原；topbar 品牌名右侧有一对等价箭头，不可用时置灰。
@@ -322,7 +331,7 @@ Fork 协作时，保留上游插件 ID、publisher 和项目链接，将代码�
 | `list_jobs` | 只读 | 列出根目录/文件夹任务，支持名称过滤 |
 | `get_job` | 只读 | 任务详情与参数定义 |
 | `list_builds` | 只读 | 最近构建列表 |
-| `get_build` | 只读 | 单次构建详情、变更集、产物 |
+| `get_build` | 只读 | 单次构建详情、构建参数、变更集、产物 |
 | `get_console_log` | 只读 | 增量控制台日志（用 `nextStart` 续读） |
 | `list_queue` | 只读 | 队列与阻塞原因 |
 | `list_nodes` | 只读 | 节点状态与执行器 |
@@ -365,14 +374,16 @@ Fork 协作时，保留上游插件 ID、publisher 和项目链接，将代码�
 | M18b 移除 Pipeline 归档工具 | 已完成（0.11.0：按用户选择整块删除，Pipeline 归档手写脚本；394 前端用例全绿） |
 | M19 Active Choices 参数 | 已完成（0.11.1：`org.biouno.unochoice.*` 参数从任务 config.xml 的脚本里提取静态选项；`PT_CHECKBOX` 渲染为复选框组、值按逗号拼接，其余渲染为下拉框；动态脚本与取不到选项时仍回退文本框；231 后端 + 403 前端用例全绿） |
 | M20 用户名密码登录 | 已完成（0.11.2：连接新增「认证方式」下拉，密码模式走 Basic Auth，密码由宿主凭据存储；缺密码时后端在发请求前拒绝，密码模式 401 追加改用 API Token 的提示；239 后端 + 403 前端用例全绿） |
+| M21 构建参数展示 | 已完成（0.12.0，Issue #7：构建详情从 `actions.parameters` 读取实际参数，自适应网格展示环境 / 分支等；同名合并、空值占位、无参不渲染；242 后端 + 408 前端用例全绿；2026-11-10 真机验收通过） |
 
 > 0.11.2 为当前对外版本号；M14–M18b 的内部迭代号（0.11.0–0.16.1）不再对外使用，逐版本验收记录见 [`docs/test-evidence.md`](./docs/test-evidence.md)。
 
 > 任务列表已按 Jenkins 原生 Views 分组：顶部 Tab 切换视图，视图内分「文件夹 / 任务」两组。
 > Tab 溢出时左右箭头滚动，当前视图自动居中；打开视图自动选中首个任务；左栏宽 320px。
-> 当前测试基线：229 后端用例（`go test ./...`）+ 394 前端用例。
+> 当前测试基线：242 后端用例（`go test ./...`）+ 408 前端用例。
 >
 > Pipeline 创建依赖 Jenkins 的 `workflow-job` / `workflow-cps` 插件；实例未安装时 Jenkins 返回 500，插件会给出去敏的 HTML 错误提示，不会创建半成品任务。
 
 ![Jenkins Views 分组](docs/screenshots/jenkins-views.png)
 ![Stage View](docs/screenshots/stage-view.png)
+![Build parameters](docs/screenshots/build-parameters-preview.png)

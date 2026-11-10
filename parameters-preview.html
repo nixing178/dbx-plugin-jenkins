@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <title>Build parameters preview</title>
+    <style>
+      /* 预览页只关心参数面板；控制台依赖宿主桥，这里不展示。 */
+      .build-view section.console {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/parameters-preview-main.ts"></script>
+  </body>
+</html>

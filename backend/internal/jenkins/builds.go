@@ -40,17 +40,27 @@ type rawChangeSet struct {
 	Items []rawChange `json:"items"`
 }
 
+// rawParameter 是构建参数值；Value 可能是字符串、布尔或数字，统一按字符串归一化。
+type rawParameter struct {
+	Name  string `json:"name"`
+	Value any    `json:"value"`
+}
+
+// rawAction 是构建 actions 里本插件关心的两类数据：触发原因与实际参数。
+type rawAction struct {
+	Causes     []Cause        `json:"causes"`
+	Parameters []rawParameter `json:"parameters"`
+}
+
 type rawBuild struct {
-	Number            int    `json:"number"`
-	Result            string `json:"result"`
-	Building          bool   `json:"building"`
-	Timestamp         int64  `json:"timestamp"`
-	Duration          int64  `json:"duration"`
-	EstimatedDuration int64  `json:"estimatedDuration"`
-	DisplayName       string `json:"displayName"`
-	Actions     []struct {
-		Causes []Cause `json:"causes"`
-	} `json:"actions"`
+	Number            int         `json:"number"`
+	Result            string      `json:"result"`
+	Building          bool        `json:"building"`
+	Timestamp         int64       `json:"timestamp"`
+	Duration          int64       `json:"duration"`
+	EstimatedDuration int64       `json:"estimatedDuration"`
+	DisplayName       string      `json:"displayName"`
+	Actions           []rawAction `json:"actions"`
 	// Freestyle 用 changeSet，Pipeline（WorkflowRun）的 changelog 只出现在 changeSets。
 	ChangeSet  rawChangeSet   `json:"changeSet"`
 	ChangeSets []rawChangeSet `json:"changeSets"`
@@ -62,6 +72,29 @@ func (raw rawBuild) causes() []Cause {
 		causes = append(causes, action.Causes...)
 	}
 	return causes
+}
+
+// buildParameters 汇总所有 action 里的参数：名称去空白、丢弃空名称，
+// 同名参数保留首次出现的位置、值以最后一次为准，避免详情页出现重复行。
+func buildParameters(actions []rawAction) []BuildParameter {
+	parameters := make([]BuildParameter, 0)
+	indexByName := make(map[string]int)
+	for _, action := range actions {
+		for _, raw := range action.Parameters {
+			name := strings.TrimSpace(raw.Name)
+			if name == "" {
+				continue
+			}
+			value := anyToString(raw.Value)
+			if index, ok := indexByName[name]; ok {
+				parameters[index].Value = value
+				continue
+			}
+			indexByName[name] = len(parameters)
+			parameters = append(parameters, BuildParameter{Name: name, Value: value})
+		}
+	}
+	return parameters
 }
 
 // changes 把构建的变更集归一化为阶段矩阵模型；没有变更时返回空切片而不是 nil。
@@ -222,26 +255,24 @@ func (c *Client) GetBuild(ctx context.Context, fullName string, number int) (*Bu
 	}
 
 	tree := "number,result,building,timestamp,duration,estimatedDuration,displayName,fullDisplayName,url," +
-		"actions[causes[shortDescription,userId,userName]]," +
+		"actions[causes[shortDescription,userId,userName],parameters[name,value]]," +
 		"changeSet[" + changeDetailItemsTree + "]," +
 		"changeSets[" + changeDetailItemsTree + "]," +
 		"artifacts[fileName,relativePath]"
 	var payload struct {
-		Number            int    `json:"number"`
-		Result            string `json:"result"`
-		Building          bool   `json:"building"`
-		Timestamp         int64  `json:"timestamp"`
-		Duration          int64  `json:"duration"`
-		EstimatedDuration int64  `json:"estimatedDuration"`
-		DisplayName       string `json:"displayName"`
-		FullDisplayName   string `json:"fullDisplayName"`
-		URL               string `json:"url"`
-		Actions           []struct {
-			Causes []Cause `json:"causes"`
-		} `json:"actions"`
-		ChangeSet  rawChangeSet   `json:"changeSet"`
-		ChangeSets []rawChangeSet `json:"changeSets"`
-		Artifacts  []Artifact     `json:"artifacts"`
+		Number            int            `json:"number"`
+		Result            string         `json:"result"`
+		Building          bool           `json:"building"`
+		Timestamp         int64          `json:"timestamp"`
+		Duration          int64          `json:"duration"`
+		EstimatedDuration int64          `json:"estimatedDuration"`
+		DisplayName       string         `json:"displayName"`
+		FullDisplayName   string         `json:"fullDisplayName"`
+		URL               string         `json:"url"`
+		Actions           []rawAction    `json:"actions"`
+		ChangeSet         rawChangeSet   `json:"changeSet"`
+		ChangeSets        []rawChangeSet `json:"changeSets"`
+		Artifacts         []Artifact     `json:"artifacts"`
 	}
 	query := url.Values{"tree": {tree}}
 	path := fmt.Sprintf("%s/%d/api/json?%s", jobPath, number, query.Encode())
@@ -259,6 +290,7 @@ func (c *Client) GetBuild(ctx context.Context, fullName string, number int) (*Bu
 		DisplayName:       payload.DisplayName,
 		FullDisplayName:   payload.FullDisplayName,
 		URL:               payload.URL,
+		Parameters:        buildParameters(payload.Actions),
 		Artifacts:         payload.Artifacts,
 		Status:            StatusFromResult(payload.Result, payload.Building),
 	}

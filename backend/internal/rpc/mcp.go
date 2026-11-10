@@ -361,7 +361,7 @@ func mcpTools(readOnly bool) []MCPTool {
 		},
 		{
 			Name:        "get_build",
-			Description: "Get one build: result, duration, causes, change set and artifacts.",
+			Description: "Get one build: result, duration, causes, parameters, change set and artifacts.",
 			InputSchema: objectSchema(map[string]any{
 				"job":    stringSchema("Job full name, e.g. team/demo."),
 				"number": numberSchema("Build number."),

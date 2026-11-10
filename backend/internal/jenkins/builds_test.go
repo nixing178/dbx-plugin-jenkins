@@ -172,6 +172,108 @@ func TestGetBuildDetail(t *testing.T) {
 	}
 }
 
+// Issue #7：构建详情要能直接看到本次构建实际使用的参数（环境、分支等），
+// 数据来自 actions.parameters，不需要再发一次请求。
+func TestGetBuildDetailReadsParameters(t *testing.T) {
+	var tree string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tree = r.URL.Query().Get("tree")
+		fmt.Fprint(w, `{
+			"number":9,"result":"SUCCESS","building":false,
+			"actions":[
+				{"causes":[{"shortDescription":"Started by user Alice"}]},
+				{"parameters":[
+					{"name":"ENV","value":"prod"},
+					{"name":"BRANCH_NAME","value":"release/1.4"},
+					{"name":"SKIP_TESTS","value":true},
+					{"name":"RETRY","value":2},
+					{"name":"EMPTY","value":null}
+				]}
+			]
+		}`)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, true)
+	build, err := client.GetBuild(context.Background(), "demo", 9)
+	if err != nil {
+		t.Fatalf("GetBuild() error = %v", err)
+	}
+	if !strings.Contains(tree, "parameters[name,value]") {
+		t.Fatalf("tree missing parameters: %s", tree)
+	}
+
+	want := []BuildParameter{
+		{Name: "ENV", Value: "prod"},
+		{Name: "BRANCH_NAME", Value: "release/1.4"},
+		{Name: "SKIP_TESTS", Value: "true"},
+		{Name: "RETRY", Value: "2"},
+		{Name: "EMPTY", Value: ""},
+	}
+	if len(build.Parameters) != len(want) {
+		t.Fatalf("parameters = %+v, want %+v", build.Parameters, want)
+	}
+	for index := range want {
+		if build.Parameters[index] != want[index] {
+			t.Errorf("parameter[%d] = %+v, want %+v", index, build.Parameters[index], want[index])
+		}
+	}
+	if len(build.Causes) != 1 || build.Causes[0].ShortDescription != "Started by user Alice" {
+		t.Errorf("causes = %+v, want the same action still parsed", build.Causes)
+	}
+}
+
+// 同名参数只保留一个（位置按首次出现），值以最后一次为准；空名称直接丢弃。
+func TestGetBuildDetailNormalizesParameterNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"number":10,"result":"SUCCESS","building":false,
+			"actions":[{"parameters":[
+				{"name":"ENV","value":"dev"},
+				{"name":"   ","value":"ignored"},
+				{"name":" ENV ","value":"prod"},
+				{"name":"LOG_LEVEL","value":"debug"}
+			]}]}`)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, true)
+	build, err := client.GetBuild(context.Background(), "demo", 10)
+	if err != nil {
+		t.Fatalf("GetBuild() error = %v", err)
+	}
+
+	want := []BuildParameter{
+		{Name: "ENV", Value: "prod"},
+		{Name: "LOG_LEVEL", Value: "debug"},
+	}
+	if len(build.Parameters) != len(want) {
+		t.Fatalf("parameters = %+v, want %+v", build.Parameters, want)
+	}
+	for index := range want {
+		if build.Parameters[index] != want[index] {
+			t.Errorf("parameter[%d] = %+v, want %+v", index, build.Parameters[index], want[index])
+		}
+	}
+}
+
+// 构建列表一次装 20 条构建，不请求参数，避免响应体随参数数量膨胀。
+func TestGetBuildsDoesNotRequestParameters(t *testing.T) {
+	var tree string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tree = r.URL.Query().Get("tree")
+		fmt.Fprint(w, `{"builds":[]}`)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL, true)
+	if _, err := client.GetBuilds(context.Background(), "demo", 5); err != nil {
+		t.Fatalf("GetBuilds() error = %v", err)
+	}
+	if strings.Contains(tree, "parameters") {
+		t.Errorf("build list tree should not request parameters: %s", tree)
+	}
+}
+
 func TestGetBuildsDefaultLimit(t *testing.T) {
 	var tree string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -129,10 +129,17 @@ export interface ArtifactTaskSnapshot {
   error?: string;
 }
 
+/** 本次构建实际使用的参数值（区别于任务上的参数定义）。 */
+export interface BuildParameter {
+  name: string;
+  value: string;
+}
+
 export interface BuildDetail extends BuildSummary {
   estimatedDuration: number;
   fullDisplayName: string;
   url: string;
+  parameters?: BuildParameter[] | null;
   changeSet: ChangeSetItem[] | null;
   artifacts: Artifact[] | null;
 }

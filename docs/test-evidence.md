@@ -1847,3 +1847,41 @@ public final class WorkflowJob extends Job   // hudson.model.Job，不是 Abstra
 ### 遗留
 
 - 真机验收未做：需在真实 Jenkins 上验证密码登录成功、2FA 实例提示、旧连接 Token 回归，并确认宿主未把密码明文写入连接配置。
+
+## 0.12.0 构建参数展示（Issue #7）
+
+### 方案
+
+见 `docs/plan-build-parameters.md`（D1:1 / D2:1 / D3:1 / D4:1）。诉求是「构建详情看不到本次构建选的参数，要看环境与分支」。
+
+- 构建详情 `tree` 增加 `actions[parameters[name,value]]`，与 causes 同一次请求取回，不额外发请求。
+- `BuildDetail.Parameters` 新字段：名称去空白、空名称丢弃、同名保留首次位置并以后值为准；字符串 / 布尔 / 数字 / null 统一转文本。
+- 前端新增「构建参数」面板：自适应网格、值等宽可换行、空值 `—`、无参不渲染；构建列表接口不请求参数。
+- 版本号统一 `0.12.0`（`manifest.json`、`package.json`、`backend/main.go`、User-Agent）。
+
+### 测试（本地）
+
+- 红：后端 3 条新用例编译失败（`undefined: BuildParameter`、`BuildDetail` 无 `Parameters` 字段）；前端 `buildParameters` 模块缺失，`Test Files 1 failed`。
+- 绿：`go vet ./...` 无输出；`go test ./... -v` → 242 PASS / 0 FAIL（新增 3）；`pnpm typecheck` exit 0；
+  `pnpm test` → `Test Files 28 passed`、`Tests 408 passed`（新增 5）；`node scripts/check-version.mjs` → `ok: 0.12.0`；
+  `pnpm build` → `ui/index.html 297.76 kB`。
+- 视觉：`pnpm dev` 打开 `parameters-preview.html`，用 Edge 无头截图核对浅色 / 深色：
+  `docs/screenshots/build-parameters-preview.png`、`docs/screenshots/build-parameters-preview-dark.png`
+  （8 个参数、含长值折行与空值占位，网格未溢出）。
+
+### 打包（0.12.0，本地未签名）
+
+- `dist/io.github.nixing178.jenkins-0.12.0-windows-x64.dbxp`，6,566,529 B，
+  sha256 `e5157cfd1291ea43a92662e4d7282d7f9ecb7e44617800182ea728cfe51e464a`。
+- 包内 5 条目（manifest + assets ×2 + sidecar + ui），`checksums.json` 5 个文件逐一复核通过。
+- `ui/index.html` 301,102 B，与本地同哈希 `06c426fa…c731bf2`；
+  sidecar identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.12.0`；
+  包内 manifest `version=0.12.0`、`id=io.github.nixing178.jenkins`。
+
+### 真机验收
+
+- 2026-11-10：用户确认 `0.12.0` 本地未签名包真机验收**通过**（构建详情可看到本次构建参数，无参构建不出现面板）。
+
+### 遗留
+
+- 未提交 PR；安装包已在 `dist/` 生成，真机验收通过。
