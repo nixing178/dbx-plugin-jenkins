@@ -320,3 +320,65 @@ func TestMCPCallUnknownTool(t *testing.T) {
 		t.Fatalf("result = %+v, want unknown tool error", call)
 	}
 }
+
+// TestMCPToolsWithLifecycle 钉住外部 MCP 的发现路径：
+// dbx-mcp 转发时连接未必在 DBX 里打开，此时只带 lifecycle 也要能列出工具，
+// 否则外部客户端看到的是空工具面。
+func TestMCPToolsWithLifecycle(t *testing.T) {
+	server := fakeJenkinsMCP(t)
+	defer server.Close()
+	service := NewService()
+
+	for _, test := range []struct {
+		name     string
+		readOnly bool
+		want     int
+	}{
+		{name: "writable", readOnly: false, want: 10},
+		{name: "read_only", readOnly: true, want: 7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var lifecycle map[string]any
+			payload := lifecyclePayload(t, server.URL, "token", "api_token", "", test.readOnly)
+			if err := json.Unmarshal(payload, &lifecycle); err != nil {
+				t.Fatalf("unmarshal lifecycle error = %v", err)
+			}
+			delete(lifecycle, "connectionId")
+
+			result := handleMCP(t, service, "mcp/tools", map[string]any{"lifecycle": lifecycle})
+			list := decodeResult[mcpToolList](t, result)
+			if len(list.Tools) != test.want {
+				t.Fatalf("tools = %d, want %d discovered via lifecycle", len(list.Tools), test.want)
+			}
+		})
+	}
+}
+
+// TestMCPToolsWithoutContext 钉住宿主 MCP 能力页的静态发现路径。
+// 设置页做工具发现时既没有打开连接、也不下发 lifecycle（真机返回
+// “工具发现失败: invalid_params: missing connectionId”），此时应返回完整工具面，
+// 读写能力交给 manifest 的 access 声明与运行期只读拦截决定。
+func TestMCPToolsWithoutContext(t *testing.T) {
+	service := NewService()
+	ctx := context.Background()
+
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(`{"connectionId":""}`)} {
+		result, rpcErr := service.Handle(ctx, "mcp/tools", raw)
+		if rpcErr != nil {
+			t.Fatalf("mcp/tools(%s) error = %+v, want static tool list", raw, rpcErr)
+		}
+		list := decodeResult[mcpToolList](t, result)
+		if len(list.Tools) != 10 {
+			t.Fatalf("mcp/tools(%s) tools = %d, want 10", raw, len(list.Tools))
+		}
+		names := map[string]bool{}
+		for _, tool := range list.Tools {
+			names[tool.Name] = true
+		}
+		for _, want := range []string{"list_jobs", "trigger_build", "stop_build"} {
+			if !names[want] {
+				t.Errorf("mcp/tools(%s) missing tool %q in static list", raw, want)
+			}
+		}
+	}
+}

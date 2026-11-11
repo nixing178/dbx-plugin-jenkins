@@ -3,6 +3,7 @@ package rpc
 import (
 	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -116,6 +117,136 @@ func TestManifestSupportsPasswordAuth(t *testing.T) {
 			if _, ok := connection.Fields[key]; !ok {
 				t.Errorf("manifest localizations[%q] missing field %q", locale, key)
 			}
+		}
+	}
+}
+
+// manifestMCPContribution 只取外部 MCP 暴露相关字段。
+type manifestMCPContribution struct {
+	Type          string  `json:"type"`
+	ID            string  `json:"id"`
+	AITools       *bool   `json:"ai_tools"`
+	ExternalTools *bool   `json:"external_tools"`
+	Toolsets      []struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	} `json:"toolsets"`
+	Tools map[string]struct {
+		Toolset string `json:"toolset"`
+		Access  string `json:"access"`
+	} `json:"tools"`
+}
+
+// TestManifestExposesMCPToolsExternally 把 dbx-mcp 的白名单契约钉在 manifest 上：
+// external_tools 只表示“允许对外”，真正决定暴露面的是 mcp.tools 里逐条的 access；
+// 声明与 mcp/tools 返回的工具名一旦漂移，外部客户端就会出现“看着有、调不到”或反之。
+func TestManifestExposesMCPToolsExternally(t *testing.T) {
+	raw, err := os.ReadFile("../../../manifest.json")
+	if err != nil {
+		t.Fatalf("read manifest.json: %v", err)
+	}
+	var manifest struct {
+		Contributions []manifestMCPContribution `json:"contributions"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest.json: %v", err)
+	}
+
+	var mcp *manifestMCPContribution
+	for index := range manifest.Contributions {
+		contribution := &manifest.Contributions[index]
+		if contribution.Type != "mcp" {
+			continue
+		}
+		if mcp != nil {
+			t.Fatal("manifest declares more than one mcp contribution; the host reads only one")
+		}
+		mcp = contribution
+	}
+	if mcp == nil {
+		t.Fatal("manifest missing mcp contribution")
+	}
+	if mcp.ExternalTools == nil || !*mcp.ExternalTools {
+		t.Fatal("mcp.external_tools must be true, otherwise dbx-mcp exposes no tool at all")
+	}
+	if mcp.AITools == nil || !*mcp.AITools {
+		t.Error("mcp.ai_tools must stay true; external exposure must not disable the built-in agent")
+	}
+
+	implemented := map[string]bool{}
+	for _, tool := range mcpTools(false) {
+		implemented[tool.Name] = true
+	}
+	if len(mcp.Tools) == 0 {
+		t.Fatal("mcp.tools is empty; external_tools without per-tool access exposes nothing")
+	}
+	if len(mcp.Tools) > 64 {
+		t.Errorf("mcp.tools has %d entries, want at most 64", len(mcp.Tools))
+	}
+	for name := range implemented {
+		if _, ok := mcp.Tools[name]; !ok {
+			t.Errorf("mcp.tools missing %q; undeclared tools are never exposed externally", name)
+		}
+	}
+	for name := range mcp.Tools {
+		if !implemented[name] {
+			t.Errorf("mcp.tools declares %q but mcp/tools never returns it", name)
+		}
+	}
+
+	readOnly := map[string]bool{}
+	for _, tool := range mcpTools(true) {
+		readOnly[tool.Name] = true
+	}
+	wantAccess := map[string]string{
+		"trigger_build":     "write",
+		"cancel_queue_item": "write",
+		"stop_build":        "full",
+	}
+	validAccess := map[string]bool{"read": true, "write": true, "full": true}
+	for name, entry := range mcp.Tools {
+		if !validAccess[entry.Access] {
+			t.Errorf("mcp.tools[%q].access = %q, want read|write|full", name, entry.Access)
+		}
+		if readOnly[name] {
+			if entry.Access != "read" {
+				t.Errorf("mcp.tools[%q].access = %q, want read", name, entry.Access)
+			}
+			continue
+		}
+		if want := wantAccess[name]; want != "" && entry.Access != want {
+			t.Errorf("mcp.tools[%q].access = %q, want %q", name, entry.Access, want)
+		}
+		if entry.Access == "read" {
+			t.Errorf("write tool %q must not be declared read", name)
+		}
+	}
+
+	if len(mcp.Toolsets) == 0 {
+		t.Fatal("mcp.toolsets is empty; the host groups external tools per toolset")
+	}
+	toolsetID := regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+	declaredToolsets := map[string]bool{}
+	for _, toolset := range mcp.Toolsets {
+		if toolset.Title == "" {
+			t.Errorf("mcp.toolsets[%q].title is required", toolset.ID)
+		}
+		if !toolsetID.MatchString(toolset.ID) {
+			t.Errorf("mcp.toolsets[%q].id must match %s", toolset.ID, toolsetID)
+		}
+		if declaredToolsets[toolset.ID] {
+			t.Errorf("mcp.toolsets declares %q twice", toolset.ID)
+		}
+		declaredToolsets[toolset.ID] = true
+	}
+	for name, entry := range mcp.Tools {
+		if entry.Toolset == "" {
+			t.Errorf("mcp.tools[%q] has no toolset, want one of %v", name, declaredToolsets)
+			continue
+		}
+		if !declaredToolsets[entry.Toolset] {
+			t.Errorf("mcp.tools[%q].toolset = %q, not declared in mcp.toolsets", name, entry.Toolset)
 		}
 	}
 }

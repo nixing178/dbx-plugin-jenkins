@@ -3,7 +3,7 @@
 在 DBX 内管理 Jenkins 任务、构建、控制台日志、队列与节点。
 
 - 插件 ID：`io.github.nixing178.jenkins`
-- 当前版本：`0.12.0`（构建详情展示本次构建参数；连接支持 API Token 与用户名密码；Active Choices 参数单选 / 多选；构建制品下载、归档产物配置、控制台日志全量导出）
+- 当前版本：`0.13.1`（开放外部 MCP：工具可经 `dbx-mcp` 暴露给外部客户端，并支持无连接上下文的静态工具发现；构建详情展示本次构建参数；连接支持 API Token 与用户名密码；Active Choices 参数单选 / 多选；构建制品下载、归档产物配置、控制台日志全量导出）
 - 形态：Go Sidecar + Vue3 静态工作台
 - 许可证：Apache-2.0
 
@@ -341,6 +341,30 @@ Fork 协作时，保留上游插件 ID、publisher 和项目链接，将代码�
 
 只读连接下，3 个写工具不会出现在工具列表中；后端仍会二次拦截。
 
+### 外部 MCP（dbx-mcp）
+
+manifest 里 `mcp.external_tools: true` 并逐工具声明 `access` 后，上述工具也可被外部 MCP 客户端调用（宿主自带的 `dbx-mcp` server，插件本身不监听端口、不实现 MCP 传输层）：
+
+1. 插件中心启用本插件 → 设置 → MCP → 能力，出现 Jenkins 卡片；
+2. 授权插件并选择访问上限（ceiling），高于上限的工具保持隐藏；
+3. 在工具列表里按需 opt-out 单个工具；破坏性工具建议同时打开「调用安全确认」。
+
+| 工具 | toolset | access | 外部语义 |
+| --- | --- | --- | --- |
+| `list_jobs` / `get_job` / `list_builds` / `get_build` / `get_console_log` / `list_queue` / `list_nodes` | `inspect` | `read` | 不改状态，可免确认 |
+| `trigger_build` | `control` | `write` | 普通变更 |
+| `cancel_queue_item` | `control` | `write` | 普通变更，可重触发 |
+| `stop_build` | `control` | `full` | 破坏性，可能触发宿主人工确认 |
+
+约束与保证：
+
+- `access` 是宿主的权威声明，会覆盖 sidecar 的 `readOnlyHint` / `destructiveHint`；**未在 `tools` 里声明的工具对外永不暴露**；
+- 只读连接仍然二次拦截：外部即使授权了 `write`/`full`，后端也会拒绝触发、停止、取消；
+- 外部调用时连接未必在 DBX 打开，因此 `mcp/tools` 也接受 `lifecycle` 载荷（与 `mcp/call` 一致），密钥仍由宿主解析后下发；
+- 宿主做工具发现时可能连上下文都不给（`connectionId` 与 `lifecycle` 皆空，0.13.0 会显示「工具发现失败」），
+  此时 `mcp/tools` 返回完整工具面，实际调用仍按连接的只读状态裁剪；
+- 新增工具或提升 access 级别后，宿主会在用户确认前保持隐藏，插件升级不会静默扩权。
+
 ## 当前进度
 
 | 里程碑 | 状态 |
@@ -375,12 +399,13 @@ Fork 协作时，保留上游插件 ID、publisher 和项目链接，将代码�
 | M19 Active Choices 参数 | 已完成（0.11.1：`org.biouno.unochoice.*` 参数从任务 config.xml 的脚本里提取静态选项；`PT_CHECKBOX` 渲染为复选框组、值按逗号拼接，其余渲染为下拉框；动态脚本与取不到选项时仍回退文本框；231 后端 + 403 前端用例全绿） |
 | M20 用户名密码登录 | 已完成（0.11.2：连接新增「认证方式」下拉，密码模式走 Basic Auth，密码由宿主凭据存储；缺密码时后端在发请求前拒绝，密码模式 401 追加改用 API Token 的提示；239 后端 + 403 前端用例全绿） |
 | M21 构建参数展示 | 已完成（0.12.0，Issue #7：构建详情从 `actions.parameters` 读取实际参数，自适应网格展示环境 / 分支等；同名合并、空值占位、无参不渲染；242 后端 + 408 前端用例全绿；2026-11-10 真机验收通过） |
+| M22 开放外部 MCP | 已完成（0.13.1：`external_tools: true` + `inspect`/`control` 两组共 10 条工具白名单，逐条声明 access；`mcp/tools` 支持 `lifecycle` 兜底与无上下文的静态发现——0.13.0 真机在 MCP 能力页报「工具发现失败: missing connectionId」，0.13.1 修复；245 后端用例全绿；待重装复测） |
 
-> 0.11.2 为当前对外版本号；M14–M18b 的内部迭代号（0.11.0–0.16.1）不再对外使用，逐版本验收记录见 [`docs/test-evidence.md`](./docs/test-evidence.md)。
+> 0.13.1 为当前对外版本号；M14–M18b 的内部迭代号（0.11.0–0.16.1）不再对外使用，逐版本验收记录见 [`docs/test-evidence.md`](./docs/test-evidence.md)。
 
 > 任务列表已按 Jenkins 原生 Views 分组：顶部 Tab 切换视图，视图内分「文件夹 / 任务」两组。
 > Tab 溢出时左右箭头滚动，当前视图自动居中；打开视图自动选中首个任务；左栏宽 320px。
-> 当前测试基线：242 后端用例（`go test ./...`）+ 408 前端用例。
+> 当前测试基线：245 后端用例（`go test ./...`）+ 408 前端用例。
 >
 > Pipeline 创建依赖 Jenkins 的 `workflow-job` / `workflow-cps` 插件；实例未安装时 Jenkins 返回 500，插件会给出去敏的 HTML 错误提示，不会创建半成品任务。
 

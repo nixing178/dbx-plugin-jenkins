@@ -43,18 +43,30 @@ var writeTools = map[string]bool{
 
 func (s *Service) handleMCPTools(raw json.RawMessage) (any, *Error) {
 	var request struct {
-		ConnectionID string `json:"connectionId"`
+		Lifecycle    json.RawMessage `json:"lifecycle"`
+		ConnectionID string          `json:"connectionId"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &request); err != nil {
 			return nil, invalidParams("invalid mcp/tools parameters")
 		}
 	}
-	client, rpcErr := s.session(request.ConnectionID)
+	hasLifecycle := len(request.Lifecycle) > 0 && string(request.Lifecycle) != "null"
+	// 宿主 MCP 能力页做静态发现时既没有打开连接、也不下发 lifecycle；
+	// 此时返回完整工具面，读写能力由 manifest 的 access 声明和运行期只读拦截决定。
+	if strings.TrimSpace(request.ConnectionID) == "" && !hasLifecycle {
+		return MCPToolList{Tools: mcpTools(false)}, nil
+	}
+	client, rpcErr := s.mcpClient(request.ConnectionID, request.Lifecycle)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
-	return MCPToolList{Tools: mcpTools(client.ReadOnly())}, nil
+	tools := mcpTools(client.ReadOnly())
+	// lifecycle 客户端只用于发现（外部 MCP 调用时连接未必在 DBX 里打开），不保留连接。
+	if hasLifecycle {
+		client.CloseIdleConnections()
+	}
+	return MCPToolList{Tools: tools}, nil
 }
 
 func (s *Service) handleMCPCall(ctx context.Context, raw json.RawMessage) (any, *Error) {
