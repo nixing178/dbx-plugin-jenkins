@@ -3,7 +3,7 @@
   "manifest_version": 1,
   "id": "io.github.nixing178.jenkins",
   "name": "Jenkins Console",
-  "version": "0.12.0",
+  "version": "0.13.1",
   "publisher": "nixing178",
   "description": "Manage Jenkins jobs, builds, console output, queue and nodes inside DBX.",
   "source": "https://github.com/nixing178/dbx-plugin-jenkins",
@@ -158,7 +158,31 @@
       "id": "io.github.nixing178.jenkins.mcp",
       "description": "Jenkins jobs, builds, console logs, queue and nodes tools.",
       "ai_tools": true,
-      "external_tools": false
+      "external_tools": true,
+      "toolsets": [
+        {
+          "id": "inspect",
+          "title": "Inspect",
+          "description": "Read-only queries: jobs, builds, console logs, queue and nodes."
+        },
+        {
+          "id": "control",
+          "title": "Control",
+          "description": "Trigger, stop and cancel Jenkins builds; requires build permissions."
+        }
+      ],
+      "tools": {
+        "list_jobs": { "toolset": "inspect", "access": "read" },
+        "get_job": { "toolset": "inspect", "access": "read" },
+        "list_builds": { "toolset": "inspect", "access": "read" },
+        "get_build": { "toolset": "inspect", "access": "read" },
+        "get_console_log": { "toolset": "inspect", "access": "read" },
+        "list_queue": { "toolset": "inspect", "access": "read" },
+        "list_nodes": { "toolset": "inspect", "access": "read" },
+        "trigger_build": { "toolset": "control", "access": "write" },
+        "stop_build": { "toolset": "control", "access": "full" },
+        "cancel_queue_item": { "toolset": "control", "access": "write" }
+      }
     }
   ],
   "localizations": {

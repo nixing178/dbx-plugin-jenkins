@@ -1885,3 +1885,67 @@ public final class WorkflowJob extends Job   // hudson.model.Job，不是 Abstra
 ### 遗留
 
 - 未提交 PR；安装包已在 `dist/` 生成，真机验收通过。
+
+## 0.13.1 开放外部 MCP
+
+### 背景
+
+DBX `plugins/README.md` 的契约：`mcp` contribution 只表示「声明了 MCP 面」，`external_tools` 仅表示「允许对外」；
+**真正决定外部 `dbx-mcp` 暴露面的是 `mcp.tools` 里逐工具的 `access` 声明**，未声明的工具永不暴露，
+宿主的声明级别还会覆盖 sidecar 的 `readOnlyHint` / `destructiveHint`。此前 manifest 为 `external_tools: false`
+且没有 `tools`，外部客户端上一把工具都看不到。
+
+另一处不对称：`mcp/call` 早已支持 `lifecycle`（连接未打开时按载荷临时建客户端），但 `mcp/tools` 只认
+`connectionId` 且必须已 `connection/connect`，外部调用场景会直接拿到 `not_connected` / `invalid_params`，
+工具发现为空。
+
+### 方案（D1–D5 全部按推荐）
+
+- `manifest.json`：`external_tools: true`；新增 `toolsets`（`inspect` 查询 / `control` 控制）与 10 条工具白名单，
+  `read`×7，`trigger_build`=`write`，`cancel_queue_item`=`write`，`stop_build`=`full`（破坏性）。
+- `backend/internal/rpc/mcp.go`：`handleMCPTools` 增加 `lifecycle` 字段，与 `handleMCPCall` 共用 `mcpClient()`；
+  用 lifecycle 建的客户端在发现后 `CloseIdleConnections()`，不保留会话。
+- 版本号 0.12.0 → 0.13.0（首版）→ 0.13.1（静态发现修复）；`manifest.json`、`package.json`、
+  `backend/main.go`、User-Agent 四处同步；`engines.dbx` 维持 `>=0.6.43`
+  （查不到 `plugin_mcp_grants` 的落地版本号，不贸然提升挡掉可用宿主）。
+- 只读连接仍是第二道闸：外部即使授权 `write`/`full`，后端 `writeTools` 拦截照旧生效。
+- 补充（0.13.1）：宿主 MCP 能力页做工具发现时**既不给 `connectionId` 也不下发 `lifecycle`**，
+  因此 `mcp/tools` 在两者皆空时返回 `mcpTools(false)` 完整工具面，读写由 manifest 的 `access`
+  与运行期只读拦截决定；有连接时仍按该连接的 `readOnly` 裁剪。
+
+### 测试（本地）
+
+- 红一轮：`TestManifestExposesMCPToolsExternally` 报 `mcp.external_tools must be true`；
+  `TestMCPToolsWithLifecycle` 两个子用例报 `invalid_params: missing connectionId`。
+- 绿一轮：`go vet ./...` 无输出；`go test ./...` → `internal/jenkins ok`、`internal/rpc ok`；
+  顶层用例 242 → 245（+3）；`node scripts/check-version.mjs` → `ok: 0.13.0`。
+- 红二轮（真机取证）：0.13.0 在 DBX「设置 → MCP → 能力」显示
+  **「工具发现失败: invalid_params: missing connectionId」**（宿主静态发现不带连接上下文）；
+  新增 `TestMCPToolsWithoutContext` 用 `null` / `{}` / `{"connectionId":""}` 三种载荷复现同一报错。
+- 绿二轮：`handleMCPTools` 增加静态发现分支；`go vet ./...` 无输出、`go test ./...` → 245 PASS / 0 FAIL；
+  `node scripts/check-version.mjs` → `ok: 0.13.1`；`pnpm typecheck` exit 0、`pnpm test` → 408 passed。
+- 打包后直连验证：启动包内 sidecar 发 `plugin/initialize` + `mcp/tools {}` →
+  `static tools=10`，`list_jobs…cancel_queue_item` 全部返回。
+
+### 打包（0.13.1，本地未签名）
+
+- `dist/io.github.nixing178.jenkins-0.13.1-windows-x64.dbxp`，6,567,664 B，
+  sha256 `a3c76222e0b32b933b1ac9b282001e55c68cfbbb34019767d99950ca950c5b90`。
+- 包内 6 条目（checksums + manifest + assets ×2 + sidecar + ui）；`checksums.json` 5 个文件逐一复核通过。
+- 包内 manifest 11,267 B：`version=0.13.1`、`external_tools=true`、`ai_tools=true`、
+  `toolsets=inspect,control`、10 条工具 access 与设计一致（7×read / trigger=write / cancel=write / stop=full）。
+- `ui/index.html` 301,102 B，与本地 `pnpm build` 产物同哈希 `f2814fcb…88c0`；
+  sidecar identity `[verify-sidecar] ok: io.github.nixing178.jenkins/0.13.1`。
+
+### 真机验收
+
+- 2026-11-11：0.13.0 首装后「设置 → MCP → 能力」报 `invalid_params: missing connectionId`（静态发现缺上下文），
+  已由 0.13.1 修复；需重装 0.13.1 后复测。
+- 待做：确认 Jenkins 卡片可授权并选上限，工具列表出现 10 条（只读连接 7 条）；
+  外部 MCP 客户端里 `list_jobs` 可调，`stop_build` 触发确认层。
+
+### 遗留
+
+- 连接未在 DBX 打开时，宿主是否对 `mcp/tools` 下发 `lifecycle` 未实测；若不下发，则仍需先在工作台打开连接。
+- 发布到 `dbx-store` 时 catalog 条目需补 `mcpTools: true`，否则商店页无 MCP 徽章（仓库外改动）。
+
