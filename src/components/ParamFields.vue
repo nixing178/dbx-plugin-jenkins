@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { t } from "../i18n";
-import { isMultiSelect, parseSelection, toggleSelection } from "../lib/paramValue";
+import { isMultiSelect } from "../lib/paramValue";
 import type { ParameterDefinition } from "../types";
+import MultiSelectField from "./MultiSelectField.vue";
 
 /**
  * 纯参数表单（无遮罩），供单任务构建与批量构建共用。
@@ -26,7 +27,7 @@ function isDisabled(parameter: ParameterDefinition): boolean {
 }
 
 function isChoiceDisabled(parameter: ParameterDefinition, choice: string): boolean {
-  return isDisabled(parameter) || parameter.disabledChoices?.includes(choice) === true;
+  return parameter.disabledChoices?.includes(choice) === true;
 }
 
 function textValue(name: string): string {
@@ -51,21 +52,16 @@ function onCheck(name: string, event: Event): void {
   update(name, (event.target as HTMLInputElement).checked);
 }
 
-function isSelected(parameter: ParameterDefinition, choice: string): boolean {
-  return parseSelection(textValue(parameter.name)).includes(choice);
-}
-
-function onChoice(parameter: ParameterDefinition, choice: string, event: Event): void {
-  const checked = (event.target as HTMLInputElement).checked;
-  update(parameter.name, toggleSelection(parameter.choices ?? [], textValue(parameter.name), choice, checked));
+function updateMultiSelect(parameter: ParameterDefinition, value: string): void {
+  update(parameter.name, value);
 }
 </script>
 
 <template>
   <div class="param-fields">
-    <label v-for="parameter in parameters" :key="parameter.name" class="field">
+    <div v-for="(parameter, index) in parameters" :key="parameter.name" class="field">
       <span class="label">
-        <code>{{ parameter.name }}</code>
+        <label :for="`param-${index}`"><code>{{ parameter.name }}</code></label>
         <span class="type">
           {{ parameter.type.replace("ParameterDefinition", "") || "String" }}
         </span>
@@ -75,21 +71,19 @@ function onChoice(parameter: ParameterDefinition, choice: string, event: Event):
         {{ t("paramFileUnsupported") }}
       </span>
 
-      <div v-if="isMultiSelect(parameter)" class="choice-group">
-        <label v-for="choice in parameter.choices ?? []" :key="choice" class="choice-item">
-          <input
-            type="checkbox"
-            class="checkbox"
-            :checked="isSelected(parameter, choice)"
-            :disabled="isChoiceDisabled(parameter, choice)"
-            @change="onChoice(parameter, choice, $event)"
-          />
-          <span>{{ choice }}</span>
-        </label>
-      </div>
+      <MultiSelectField
+        v-if="isMultiSelect(parameter)"
+        :name="parameter.name"
+        :model-value="textValue(parameter.name)"
+        :choices="parameter.choices ?? []"
+        :disabled="isDisabled(parameter)"
+        :disabled-choices="parameter.disabledChoices ?? []"
+        @update:model-value="updateMultiSelect(parameter, $event)"
+      />
 
       <select
         v-else-if="parameter.choices?.length"
+        :id="`param-${index}`"
         :value="textValue(parameter.name)"
         :disabled="isDisabled(parameter)"
         @change="onInput(parameter.name, $event)"
@@ -106,6 +100,7 @@ function onChoice(parameter: ParameterDefinition, choice: string, event: Event):
 
       <textarea
         v-else-if="parameter.type === 'TextParameterDefinition'"
+        :id="`param-${index}`"
         :value="textValue(parameter.name)"
         :disabled="isDisabled(parameter)"
         rows="3"
@@ -114,6 +109,7 @@ function onChoice(parameter: ParameterDefinition, choice: string, event: Event):
 
       <input
         v-else-if="parameter.type === 'BooleanParameterDefinition'"
+        :id="`param-${index}`"
         type="checkbox"
         class="checkbox"
         :checked="boolValue(parameter.name)"
@@ -123,6 +119,7 @@ function onChoice(parameter: ParameterDefinition, choice: string, event: Event):
 
       <input
         v-else-if="parameter.type === 'PasswordParameterDefinition'"
+        :id="`param-${index}`"
         type="password"
         :value="textValue(parameter.name)"
         :disabled="isDisabled(parameter)"
@@ -131,12 +128,13 @@ function onChoice(parameter: ParameterDefinition, choice: string, event: Event):
 
       <input
         v-else
+        :id="`param-${index}`"
         type="text"
         :value="textValue(parameter.name)"
         :disabled="isDisabled(parameter)"
         @input="onInput(parameter.name, $event)"
       />
-    </label>
+    </div>
   </div>
 </template>
 
@@ -211,23 +209,5 @@ textarea:focus {
 .checkbox {
   width: 16px;
   height: 16px;
-}
-
-.choice-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel-soft);
-}
-
-.choice-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  cursor: pointer;
 }
 </style>

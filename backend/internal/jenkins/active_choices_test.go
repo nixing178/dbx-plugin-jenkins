@@ -11,7 +11,7 @@ import (
 )
 
 const testActiveChoiceForm = `<!doctype html><html><body><form>
-<div class="active-choice"><input name="name" value="BRANCH"><select name="value"><option>origin/test</option></select></div>
+<div class="active-choice"><input name="name" value="BRANCH"><select name="value"></select></div>
 <span class="cascade-choice-parameter-data-holder" data-name="BRANCH" data-proxy-name="cascadeChoiceParameter_branch" data-referenced-parameters=""></span>
 <script src="/$stapler/bound/script/$stapler/bound/11111111-1111-4111-8111-111111111111?var=cascadeChoiceParameter_branch&amp;methods=doUpdate,getChoicesForUI"></script>
 <div class="active-choice"><input name="name" value="BUILD_MODULES"><div><input name="value" type="checkbox" value="请选择"></div></div>

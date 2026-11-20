@@ -47,6 +47,10 @@ type Client struct {
 	version string
 	crumb   crumbState
 
+	parameterMu       sync.Mutex
+	parameterSessions map[string]*parameterSession
+	parameterLocks    map[string]*sync.Mutex
+
 	// 制品缓存按目标文件加锁，避免并发下载同一制品写坏文件。
 	artifactMu    sync.Mutex
 	artifactLocks map[string]*sync.Mutex
@@ -138,14 +142,16 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 
 	return &Client{
-		baseURL:        strings.TrimRight(parsed.String(), "/"),
-		username:       cfg.Username,
-		secret:         cfg.Secret,
-		readOnly:       cfg.ReadOnly,
-		httpClient:     httpClient,
-		writeClient:    writeClient,
-		downloadClient: downloadClient,
-		downloadDir:    strings.TrimSpace(cfg.DownloadDir),
+		baseURL:           strings.TrimRight(parsed.String(), "/"),
+		username:          cfg.Username,
+		secret:            cfg.Secret,
+		readOnly:          cfg.ReadOnly,
+		httpClient:        httpClient,
+		writeClient:       writeClient,
+		downloadClient:    downloadClient,
+		downloadDir:       strings.TrimSpace(cfg.DownloadDir),
+		parameterSessions: map[string]*parameterSession{},
+		parameterLocks:    map[string]*sync.Mutex{},
 	}, nil
 }
 

@@ -60,6 +60,10 @@ const en = {
   buildWithParams: "Build with parameters",
   parameterOptionsLoading: "Loading choices from Jenkins…",
   parameterOptionsFailed: "Could not load parameter choices: {error}",
+  selectParameterOptions: "Select options",
+  filterParameterOptions: "Filter options…",
+  selectedParameterOptions: "{count} selected",
+  noParameterOptions: "No matching options",
   stopBuild: "Stop",
   builds: "Builds",
 
@@ -343,6 +347,10 @@ const zh: Record<keyof typeof en, string> = {
   buildWithParams: "带参数构建",
   parameterOptionsLoading: "正在从 Jenkins 加载选项…",
   parameterOptionsFailed: "无法加载参数选项：{error}",
+  selectParameterOptions: "请选择",
+  filterParameterOptions: "筛选选项…",
+  selectedParameterOptions: "已选 {count} 项",
+  noParameterOptions: "没有匹配的选项",
   stopBuild: "停止",
   builds: "构建",
 
