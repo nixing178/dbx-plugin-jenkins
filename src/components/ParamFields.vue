@@ -10,6 +10,7 @@ import type { ParameterDefinition } from "../types";
 const props = defineProps<{
   parameters: ParameterDefinition[];
   modelValue: Record<string, unknown>;
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -21,7 +22,11 @@ function isFile(parameter: ParameterDefinition): boolean {
 }
 
 function isDisabled(parameter: ParameterDefinition): boolean {
-  return isFile(parameter);
+  return isFile(parameter) || props.disabled === true;
+}
+
+function isChoiceDisabled(parameter: ParameterDefinition, choice: string): boolean {
+  return isDisabled(parameter) || parameter.disabledChoices?.includes(choice) === true;
 }
 
 function textValue(name: string): string {
@@ -76,7 +81,7 @@ function onChoice(parameter: ParameterDefinition, choice: string, event: Event):
             type="checkbox"
             class="checkbox"
             :checked="isSelected(parameter, choice)"
-            :disabled="isDisabled(parameter)"
+            :disabled="isChoiceDisabled(parameter, choice)"
             @change="onChoice(parameter, choice, $event)"
           />
           <span>{{ choice }}</span>
@@ -89,7 +94,12 @@ function onChoice(parameter: ParameterDefinition, choice: string, event: Event):
         :disabled="isDisabled(parameter)"
         @change="onInput(parameter.name, $event)"
       >
-        <option v-for="choice in parameter.choices ?? []" :key="choice" :value="choice">
+        <option
+          v-for="choice in parameter.choices ?? []"
+          :key="choice"
+          :value="choice"
+          :disabled="parameter.disabledChoices?.includes(choice)"
+        >
           {{ choice }}
         </option>
       </select>

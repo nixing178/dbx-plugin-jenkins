@@ -245,6 +245,16 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 		}
 		return job, nil
 
+	case "jenkins/parameterOptions":
+		if strings.TrimSpace(request.Job) == "" {
+			return nil, invalidParams("missing job name")
+		}
+		parameters, err := client.GetParameterOptions(ctx, request.Job, toStringParams(request.Params))
+		if err != nil {
+			return nil, mapError(err)
+		}
+		return map[string]any{"parameters": parameters}, nil
+
 	case "jenkins/builds":
 		if strings.TrimSpace(request.Job) == "" {
 			return nil, invalidParams("missing job name")
@@ -845,6 +855,14 @@ func stringValue(value any) string {
 		return text
 	}
 	return fmt.Sprint(value)
+}
+
+func toStringParams(params map[string]any) map[string]string {
+	values := make(map[string]string, len(params))
+	for key, value := range params {
+		values[key] = stringValue(value)
+	}
+	return values
 }
 
 func toForm(params map[string]any) url.Values {

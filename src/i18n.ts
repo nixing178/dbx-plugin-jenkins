@@ -58,6 +58,8 @@ const en = {
 
   buildNow: "Build",
   buildWithParams: "Build with parameters",
+  parameterOptionsLoading: "Loading choices from Jenkins…",
+  parameterOptionsFailed: "Could not load parameter choices: {error}",
   stopBuild: "Stop",
   builds: "Builds",
 
@@ -339,6 +341,8 @@ const zh: Record<keyof typeof en, string> = {
 
   buildNow: "立即构建",
   buildWithParams: "带参数构建",
+  parameterOptionsLoading: "正在从 Jenkins 加载选项…",
+  parameterOptionsFailed: "无法加载参数选项：{error}",
   stopBuild: "停止",
   builds: "构建",
 

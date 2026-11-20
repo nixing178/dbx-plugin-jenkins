@@ -136,6 +136,7 @@ func (c *Client) GetJob(ctx context.Context, fullName string) (*JobDetail, error
 				Type:        definition.Type,
 				Description: definition.Description,
 				Choices:     definition.Choices,
+				Dynamic:     isDynamicChoiceClass(definition.Class),
 			}
 			if definition.DefaultParameterValue != nil {
 				parameter.DefaultValue = anyToString(definition.DefaultParameterValue.Value)
