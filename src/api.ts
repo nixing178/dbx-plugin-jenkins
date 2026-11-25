@@ -17,6 +17,7 @@ import type {
   MutationResult,
   NodeInfo,
   Overview,
+  ParameterDefinition,
   QueueItem,
   SavedFile,
   StageInfo,
@@ -87,6 +88,14 @@ export const jenkinsApi = {
    */
   job(job: string, timeoutMs = 30_000): Promise<JobDetail> {
     return invoke<JobDetail>("jenkins/job", { job }, timeoutMs);
+  },
+
+  parameterOptions(
+    job: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = 60_000,
+  ): Promise<{ parameters: ParameterDefinition[] }> {
+    return invoke("jenkins/parameterOptions", { job, params }, timeoutMs);
   },
 
   builds(job: string, limit = 20, timeoutMs = 30_000): Promise<{ builds: BuildSummary[] }> {

@@ -136,11 +136,12 @@ func (c *Client) GetJob(ctx context.Context, fullName string) (*JobDetail, error
 				Type:        definition.Type,
 				Description: definition.Description,
 				Choices:     definition.Choices,
+				Dynamic:     isDynamicChoiceClass(definition.Class),
 			}
 			if definition.DefaultParameterValue != nil {
 				parameter.DefaultValue = anyToString(definition.DefaultParameterValue.Value)
 			}
-			if len(definition.Choices) == 0 && isActiveChoiceClass(definition.Class) {
+			if len(definition.Choices) == 0 && isActiveChoiceClass(definition.Class) && !parameter.Dynamic {
 				activeChoice[definition.Name] = true
 			}
 			job.Parameters = append(job.Parameters, parameter)

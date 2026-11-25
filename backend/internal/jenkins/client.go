@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	userAgent   = "dbx-jenkins-plugin/0.13.1"
+	userAgent   = "dbx-jenkins-plugin/0.13.2"
 	maxJSONBody = 8 << 20
 )
 
@@ -34,11 +34,11 @@ type crumbState struct {
 // Client 是 Jenkins REST 客户端。它持有 CookieJar、CSRF crumb 缓存和版本信息，
 // 必须按连接复用；并发调用由内部锁保护。
 type Client struct {
-	baseURL    string
-	username   string
-	secret     string
-	readOnly   bool
-	httpClient *http.Client
+	baseURL     string
+	username    string
+	secret      string
+	readOnly    bool
+	httpClient  *http.Client
 	writeClient *http.Client
 	// downloadClient 不设整体超时：大制品可能远超普通请求超时，由调用方用 context 限时。
 	downloadClient *http.Client
@@ -46,6 +46,10 @@ type Client struct {
 	mu      sync.Mutex
 	version string
 	crumb   crumbState
+
+	parameterMu       sync.Mutex
+	parameterSessions map[string]*parameterSession
+	parameterLocks    map[string]*sync.Mutex
 
 	// 制品缓存按目标文件加锁，避免并发下载同一制品写坏文件。
 	artifactMu    sync.Mutex
@@ -60,8 +64,8 @@ type Client struct {
 
 // Config 是连接 Jenkins 所需的全部配置。
 type Config struct {
-	BaseURL            string
-	Username           string
+	BaseURL  string
+	Username string
 	// Secret 是 Basic Auth 的密码或 API Token，由 RPC 层按认证方式解析。
 	Secret             string
 	ReadOnly           bool
@@ -138,14 +142,16 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 
 	return &Client{
-		baseURL:        strings.TrimRight(parsed.String(), "/"),
-		username:       cfg.Username,
-		secret:         cfg.Secret,
-		readOnly:       cfg.ReadOnly,
-		httpClient:     httpClient,
-		writeClient:    writeClient,
-		downloadClient: downloadClient,
-		downloadDir:    strings.TrimSpace(cfg.DownloadDir),
+		baseURL:           strings.TrimRight(parsed.String(), "/"),
+		username:          cfg.Username,
+		secret:            cfg.Secret,
+		readOnly:          cfg.ReadOnly,
+		httpClient:        httpClient,
+		writeClient:       writeClient,
+		downloadClient:    downloadClient,
+		downloadDir:       strings.TrimSpace(cfg.DownloadDir),
+		parameterSessions: map[string]*parameterSession{},
+		parameterLocks:    map[string]*sync.Mutex{},
 	}, nil
 }
 
@@ -200,6 +206,12 @@ func (c *Client) Get(ctx context.Context, path string, out any) error {
 
 // GetRaw 发起 GET 请求并返回原始响应体（用于 config.xml 等非 JSON 资源）。
 func (c *Client) GetRaw(ctx context.Context, path, accept string) ([]byte, error) {
+	return c.getRaw(ctx, path, accept)
+}
+
+// getRaw 的 allowedErrorStatuses 仅用于 Jenkins 2.529 参数表单：
+// 该版本 GET /build 返回 405 页面，但页面中仍包含完整的参数定义和动态代理。
+func (c *Client) getRaw(ctx context.Context, path, accept string, allowedErrorStatuses ...int) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.resolve(path), nil)
 	if err != nil {
 		return nil, &APIError{Kind: ErrRequest, Message: err.Error()}
@@ -220,6 +232,11 @@ func (c *Client) GetRaw(ctx context.Context, path, accept string) ([]byte, error
 		return nil, &APIError{Kind: ErrNetwork, Message: "cannot read Jenkins response"}
 	}
 	if response.StatusCode >= 400 {
+		for _, allowed := range allowedErrorStatuses {
+			if response.StatusCode == allowed {
+				return data, nil
+			}
+		}
 		return nil, newAPIError(response.StatusCode, data)
 	}
 	return data, nil
