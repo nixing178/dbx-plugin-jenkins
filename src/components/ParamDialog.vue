@@ -4,6 +4,7 @@ import { describeError, jenkinsApi } from "../api";
 import { t } from "../i18n";
 import { buildParamValues } from "../lib/batchBuild";
 import {
+  changedReferencedParameters,
   hasDynamicParameters,
   reconcileParameterValues,
 } from "../lib/dynamicParams";
@@ -25,15 +26,21 @@ const optionsLoading = ref(false);
 const optionsError = ref("");
 let optionsRequest = 0;
 
-async function loadOptions(): Promise<void> {
+async function loadOptions(round = 0): Promise<void> {
   const request = ++optionsRequest;
+  const requestedValues = { ...values.value };
   optionsLoading.value = true;
   optionsError.value = "";
   try {
-    const result = await jenkinsApi.parameterOptions(props.job.fullName, values.value);
+    const result = await jenkinsApi.parameterOptions(props.job.fullName, requestedValues);
     if (request !== optionsRequest) return;
     parameters.value = result.parameters ?? [];
-    values.value = reconcileParameterValues(parameters.value, values.value);
+    const reconciled = reconcileParameterValues(parameters.value, values.value);
+    values.value = reconciled;
+    const changed = changedReferencedParameters(parameters.value, requestedValues, reconciled);
+    if (changed.length > 0 && round < parameters.value.length) {
+      await loadOptions(round + 1);
+    }
   } catch (error) {
     if (request === optionsRequest) optionsError.value = describeError(error);
   } finally {
@@ -47,6 +54,10 @@ function updateValues(next: Record<string, unknown>): void {
   );
   values.value = next;
   if (refresh) void loadOptions();
+}
+
+function retryOptions(): void {
+  void loadOptions();
 }
 
 function submit(): void {
@@ -90,7 +101,7 @@ onBeforeUnmount(() => {
         </p>
         <div v-if="optionsError" class="options-error" role="alert">
           <span>{{ t("parameterOptionsFailed", { error: optionsError }) }}</span>
-          <button type="button" class="ghost retry" @click="loadOptions">
+          <button type="button" class="ghost retry" @click="retryOptions">
             {{ t("retry") }}
           </button>
         </div>

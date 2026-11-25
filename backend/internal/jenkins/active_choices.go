@@ -48,6 +48,10 @@ func (c *Client) getParameterOptions(ctx context.Context, fullName string, value
 	}
 
 	parameters := cloneParameterDefinitions(session.parameters)
+	if values == nil {
+		values = map[string]string{}
+	}
+	normalizeParameterValues(parameters, values, false)
 	for index := range parameters {
 		base := parameters[index]
 		form, ok := session.forms[base.Name]
@@ -65,6 +69,7 @@ func (c *Client) getParameterOptions(ctx context.Context, fullName string, value
 		key := base.Name + "\x00" + string(payload)
 		if cached, ok := session.options[key]; ok {
 			parameters[index] = cloneParameterDefinition(cached)
+			normalizeParameterValues(parameters[:index+1], values, true)
 			continue
 		}
 
@@ -78,8 +83,52 @@ func (c *Client) getParameterOptions(ctx context.Context, fullName string, value
 		}
 		session.options[key] = cloneParameterDefinition(parameter)
 		parameters[index] = parameter
+		// 上游选项刚计算出有效默认值时，必须立即用于后续级联参数。
+		normalizeParameterValues(parameters[:index+1], values, true)
 	}
 	return parameters, nil
+}
+
+// normalizeParameterValues 在求值每个级联参数前统一上游的当前值。
+// 仅修正不在候选集中的空值或占位值；用户已经选择的有效值、合法空选项保持不变。
+func normalizeParameterValues(parameters []ParameterDefinition, values map[string]string, evaluated bool) {
+	for _, parameter := range parameters {
+		if !parameter.Dynamic && len(parameter.Choices) == 0 {
+			continue
+		}
+		if parameter.Dynamic && len(parameter.Choices) == 0 {
+			if evaluated {
+				values[parameter.Name] = ""
+			}
+			continue
+		}
+		if parameter.MultiSelect {
+			values[parameter.Name] = validParameterSelection(values[parameter.Name], parameter.Choices, parameter.DisabledChoices)
+			if values[parameter.Name] == "" && len(parameter.SelectedValues) > 0 {
+				values[parameter.Name] = validParameterSelection(strings.Join(parameter.SelectedValues, ","), parameter.Choices, parameter.DisabledChoices)
+			}
+			continue
+		}
+		current, present := values[parameter.Name]
+		if present && containsString(parameter.Choices, current) && !containsString(parameter.DisabledChoices, current) {
+			continue
+		}
+		values[parameter.Name] = ""
+		if selected := validParameterSelection(strings.Join(parameter.SelectedValues, ","), parameter.Choices, parameter.DisabledChoices); selected != "" {
+			values[parameter.Name] = selected
+			continue
+		}
+		if containsString(parameter.Choices, parameter.DefaultValue) && !containsString(parameter.DisabledChoices, parameter.DefaultValue) {
+			values[parameter.Name] = parameter.DefaultValue
+			continue
+		}
+		for _, choice := range parameter.Choices {
+			if !containsString(parameter.DisabledChoices, choice) {
+				values[parameter.Name] = choice
+				break
+			}
+		}
+	}
 }
 
 func (c *Client) loadParameterSession(ctx context.Context, fullName string) (*parameterSession, error) {

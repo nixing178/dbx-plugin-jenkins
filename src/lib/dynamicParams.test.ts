@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ParameterDefinition } from "../types";
-import { hasDynamicParameters, reconcileParameterValues } from "./dynamicParams";
+import { changedReferencedParameters, hasDynamicParameters, reconcileParameterValues } from "./dynamicParams";
 
 function parameter(overrides: Partial<ParameterDefinition>): ParameterDefinition {
   return {
@@ -90,11 +90,29 @@ describe("dynamic parameter options", () => {
     expect(result.BRANCH).toBe("");
   });
 
-  it("does not change static parameter values", () => {
+  it("normalizes an invalid static choice but preserves plain text", () => {
     const result = reconcileParameterValues(
-      [parameter({ name: "ENV", choices: ["dev", "prod"] })],
-      { ENV: "custom" },
+      [
+        parameter({ name: "REPOSITORY", type: "ChoiceParameterDefinition", choices: ["repo-a", "repo-b"] }),
+        parameter({ name: "TEXT", type: "StringParameterDefinition" }),
+      ],
+      { REPOSITORY: "", TEXT: "custom" },
     );
-    expect(result.ENV).toBe("custom");
+    expect(result.REPOSITORY).toBe("repo-a");
+    expect(result.TEXT).toBe("custom");
+  });
+
+  it("detects normalized values that require dependent options to refresh", () => {
+    const parameters = [
+      parameter({ name: "BRANCH", dynamic: true, referencedParameters: ["REPOSITORY"] }),
+      parameter({ name: "BUILD_MODULES", dynamic: true, referencedParameters: ["REPOSITORY", "BRANCH"] }),
+    ];
+    const changed = changedReferencedParameters(
+      parameters,
+      { REPOSITORY: "", BRANCH: "请先选择代码仓库" },
+      { REPOSITORY: "repo-a", BRANCH: "origin/master" },
+    );
+    expect(new Set(changed)).toEqual(new Set(["REPOSITORY", "BRANCH"]));
+    expect(changedReferencedParameters(parameters, { REPOSITORY: "repo-a" }, { REPOSITORY: "repo-a" })).toEqual([]);
   });
 });

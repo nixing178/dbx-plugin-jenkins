@@ -5,6 +5,21 @@ export function hasDynamicParameters(parameters: ParameterDefinition[]): boolean
   return parameters.some((parameter) => parameter.dynamic === true);
 }
 
+/** 返回本轮归一化实际改变了哪些级联引用值，用于判断是否需要补一轮求值。 */
+export function changedReferencedParameters(
+  parameters: ParameterDefinition[],
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): string[] {
+  const names = new Set<string>();
+  for (const parameter of parameters) {
+    for (const name of parameter.referencedParameters ?? []) {
+      if (before[name] !== after[name]) names.add(name);
+    }
+  }
+  return [...names];
+}
+
 /** 保留仍有效的用户选择；失效的旧值/提示文字不能作为新选项提交。 */
 export function reconcileParameterValues(
   parameters: ParameterDefinition[],
@@ -12,13 +27,13 @@ export function reconcileParameterValues(
 ): Record<string, unknown> {
   const next = { ...values };
   for (const parameter of parameters) {
-    if (!parameter.dynamic) continue;
-    if (!parameter.choices?.length) {
+    if (!parameter.dynamic && !parameter.choices?.length) continue;
+    if (parameter.dynamic && !parameter.choices?.length) {
       next[parameter.name] = "";
       continue;
     }
     const disabled = new Set(parameter.disabledChoices ?? []);
-    const choices = parameter.choices.filter((choice) => !disabled.has(choice));
+    const choices = (parameter.choices ?? []).filter((choice) => !disabled.has(choice));
     if (parameter.multiSelect) {
       const selected = parseSelection(String(next[parameter.name] ?? "")).filter((value) =>
         choices.includes(value),
@@ -36,7 +51,10 @@ export function reconcileParameterValues(
     const current = String(next[parameter.name] ?? "");
     if (choices.includes(current)) continue;
     const selected = (parameter.selectedValues ?? []).find((value) => choices.includes(value));
-    next[parameter.name] = selected ?? choices[0] ?? "";
+    const fallback = parameter.defaultValue && choices.includes(parameter.defaultValue)
+      ? parameter.defaultValue
+      : choices[0];
+    next[parameter.name] = selected ?? fallback ?? "";
   }
   return next;
 }

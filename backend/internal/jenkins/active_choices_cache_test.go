@@ -18,6 +18,9 @@ func cachedParameterForm(moduleUUID string) string {
 	return fmt.Sprintf(`<html><body><form>
 	<div class="active-choice"><input name="name" value="BRANCH"><select name="value">
 		<option value="origin/test" selected="true">origin/test</option>
+		<option value="origin/dev">origin/dev</option>
+		<option value="origin/master">origin/master</option>
+		<option value="origin/release">origin/release</option>
 		<option value="origin/old" disabled="true">origin/old</option>
 	</select></div>
 	<span class="cascade-choice-parameter-data-holder" data-name="BRANCH" data-proxy-name="branch"></span>
@@ -73,7 +76,7 @@ func TestParameterOptionsReuseInitialChoicesAndCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first options error = %v", err)
 	}
-	if got := parameters[0].Choices; len(got) != 2 || got[0] != "origin/test" || got[1] != "origin/old" {
+	if got := parameters[0].Choices; len(got) != 5 || got[0] != "origin/test" || got[4] != "origin/old" {
 		t.Errorf("initial branch choices = %v", got)
 	}
 	if parameters[0].DefaultValue != "origin/test" || len(parameters[0].DisabledChoices) != 1 {

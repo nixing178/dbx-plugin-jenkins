@@ -19,7 +19,7 @@
 
 - `go test ./... -count=1`：通过，覆盖动态表单、级联引用参数、多选、禁用/选中项、静态参数不读表单、RPC 以及禁止触发构建请求。
 - `go vet ./...`：通过。
-- `pnpm test`：30 个测试文件、424 个用例通过。
+- `pnpm test`：30 个测试文件、425 个用例通过。
 - `pnpm typecheck`、`pnpm build`：通过，版本一致性检查为 0.13.2。
 - `@dbx-app/plugin-cli@0.1.9 package .`：生成 `io.github.nixing178.jenkins-0.13.2-windows-x64.dbxp` 本地未签名包。
 - 使用修复后的 Go 客户端对真实 Jenkins 做只读验证：`BRANCH` 返回 37 个选项；`origin/test` 和 `origin/dev` 均返回 `buss-mock`、`common-component`、`iot-codec`、`iot-connector`、`iot-log` 五个模块，且 `BUILD_MODULES` 正确识别为引用 `BRANCH` 的多选参数。
